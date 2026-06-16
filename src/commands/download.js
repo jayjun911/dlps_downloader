@@ -5,6 +5,7 @@ const { getBestDownloadLinks, getRegionPriority } = require('../services/linkExt
 const { download1fichier } = require('../services/fichierDownloader');
 const { extractVersion } = require('../utils/versionParser');
 const { convertToFfpfsc } = require('../services/converter');
+const { isArchiveEncrypted, extractRarArchive, getGameInfoFromArchive, compressFolderToRar } = require('../services/unrarService');
 const logger = require('../utils/logger');
 const open = require('open');
 const readline = require('readline');
@@ -77,6 +78,7 @@ async function downloadSingleGame(game) {
     for (let i = 0; i < sections.length; i++) {
       const section = sections[i];
       let downloadedFiles = [];
+      let downloadCompleted = false;
       
       const regionInfo = `region [${section.region}], PPSA [${section.ppsa}]`;
       spinner.text = `Trying option ${i + 1}/${sections.length}: ${regionInfo}...`;
@@ -100,7 +102,11 @@ async function downloadSingleGame(game) {
                 partSpinner.text = `Downloading${partLabel}: ${progress.percent}% (${progress.receivedMB}MB / ${progress.totalMB}MB)`;
               });
               
-              partSpinner.succeed(`Downloaded part ${partIdx}: ${result.filename}`);
+              if (result.skipped) {
+                partSpinner.succeed(`Already downloaded (skipped) part ${partIdx}: ${result.filename}`);
+              } else {
+                partSpinner.succeed(`Downloaded part ${partIdx}: ${result.filename}`);
+              }
               downloadedFiles.push(result.filename);
             } catch (downloadErr) {
               partSpinner.fail(`Failed to download part ${partIdx}: ${downloadErr.message}`);
@@ -111,8 +117,9 @@ async function downloadSingleGame(game) {
           }
           
           logger.success(`Successfully completed download for "${game.title}"`);
+          downloadCompleted = true;
   
-          // ── Step 3: Automatically convert to .ffpfsc ──
+          // ── Step 3: Automatically handle password check and extraction ──
           if (downloadedFiles.length > 0) {
             let mainFileName = downloadedFiles[0];
             if (downloadedFiles.length > 1) {
@@ -127,41 +134,126 @@ async function downloadSingleGame(game) {
               }
             }
   
-            const ppsa = bestLinks.ppsa || targetPPSA || 'Unknown';
-            const version = extractVersion(mainFileName);
-            const finalBaseName = `${game.title} [${ppsa}][${version}].ffpfsc`;
-            const outputFilePath = path.join(downloadDir, finalBaseName);
             const mainFilePath = path.join(downloadDir, mainFileName);
-  
-            const converterSpinner = ora(`Converting "${mainFileName}" to ffpfsc...`).start();
+            
+            const checkSpinner = ora(`Inspecting "${mainFileName}" internally...`).start();
             try {
-              await convertToFfpfsc(mainFilePath, outputFilePath, bestLinks.password);
-              converterSpinner.succeed(`Successfully converted to: ${finalBaseName}`);
-  
-              // Clean up original downloaded archive files
-              const deleteSpinner = ora('Cleaning up downloaded archives...').start();
-              for (const file of downloadedFiles) {
+              // Extract and parse param.json to get exact title, ID, version, and encrypted status
+              const gameInfo = await getGameInfoFromArchive(mainFilePath, bestLinks.password);
+              const ppsa = gameInfo.titleId;
+              const version = gameInfo.version;
+              const title = gameInfo.titleName;
+              
+              // Final unified naming format: Game Title [PPSA][Version]
+              const finalBaseName = `${title} [${ppsa}][${version}]`;
+              
+              if (gameInfo.encrypted) {
+                checkSpinner.info(`"${mainFileName}" is password-protected. Starting extraction to Folder format...`);
+                
+                const outputFolderPath = path.join(downloadDir, finalBaseName);
+                const extractSpinner = ora(`Extracting "${mainFileName}" to folder "${finalBaseName}"...`).start();
                 try {
-                  fs.unlinkSync(path.join(downloadDir, file));
-                } catch (e) {
-                  // ignore delete error
-                }
-              }
-              deleteSpinner.succeed('Cleaned up downloaded archive files.');
+                  await extractRarArchive(mainFilePath, outputFolderPath, gameInfo.workingPassword);
+                  
+                  // Verify destination folder exists and has files
+                  if (!fs.existsSync(outputFolderPath) || fs.readdirSync(outputFolderPath).length === 0) {
+                    throw new Error(`Extraction failed: Output folder was not created or is empty: ${outputFolderPath}`);
+                  }
+                  
+                  extractSpinner.succeed(`Successfully extracted to folder: ${finalBaseName}`);
   
-              // Save final .ffpfsc file to downloaded.xml database
-              addDownloadedGame({
-                title: game.title,
-                fileName: finalBaseName,
-                ppsa: ppsa,
-                password: bestLinks.password,
-                source: '1fichier',
-                region: bestLinks.region
-              });
-            } catch (convErr) {
-              converterSpinner.fail(`Conversion failed: ${convErr.message}`);
-              logFailure(game.title, game.url, `Conversion failed: ${convErr.message}`);
-              throw convErr;
+                  // Clean up original downloaded archive files
+                  const deleteSpinner = ora('Cleaning up downloaded archives...').start();
+                  for (const file of downloadedFiles) {
+                    try {
+                      fs.unlinkSync(path.join(downloadDir, file));
+                    } catch (e) {
+                      // ignore delete error
+                    }
+                  }
+                  deleteSpinner.succeed('Cleaned up downloaded archive files.');
+  
+                  // Compress flattened folder back to password-free RAR format
+                  const compressSpinner = ora(`Compressing flattened folder back to password-free RAR: ${finalBaseName}.rar...`).start();
+                  try {
+                    const destRarPath = path.join(downloadDir, `${finalBaseName}.rar`);
+                    await compressFolderToRar(outputFolderPath, destRarPath);
+
+                    if (!fs.existsSync(destRarPath) || fs.statSync(destRarPath).size === 0) {
+                      throw new Error(`Compression failed: Output RAR file was not created or is empty: ${destRarPath}`);
+                    }
+
+                    compressSpinner.succeed(`Successfully compressed to clean RAR: ${finalBaseName}.rar`);
+
+                    // Clean up temporary extracted folder
+                    const folderCleanupSpinner = ora('Cleaning up temporary extracted folder...').start();
+                    try {
+                      fs.rmSync(outputFolderPath, { recursive: true, force: true });
+                      folderCleanupSpinner.succeed('Cleaned up temporary extracted folder.');
+                    } catch (e) {
+                      folderCleanupSpinner.warn(`Failed to delete temporary extracted folder: ${e.message}`);
+                    }
+
+                    // Save renamed rar file name to downloaded.xml database
+                    addDownloadedGame({
+                      title: title,
+                      fileName: `${finalBaseName}.rar`,
+                      ppsa: ppsa,
+                      password: '', // Now password-free!
+                      source: '1fichier',
+                      region: bestLinks.region
+                    });
+                  } catch (compErr) {
+                    compressSpinner.fail(`Compression failed: ${compErr.message}`);
+                    logFailure(game.title, game.url, `Compression failed: ${compErr.message}`);
+                    throw compErr;
+                  }
+                } catch (extErr) {
+                  extractSpinner.fail(`Extraction failed: ${extErr.message}`);
+                  logFailure(game.title, game.url, `Extraction failed: ${extErr.message}`);
+                  throw extErr;
+                }
+              } else {
+                checkSpinner.info(`"${mainFileName}" has no password. Renaming RAR files to standard format...`);
+                
+                const renamedFiles = [];
+                let newMainFileName = `${finalBaseName}.rar`;
+                
+                for (const file of downloadedFiles) {
+                  const partMatch = file.match(/(\.part[0-9]+\.rar)$/i);
+                  let newFileName;
+                  if (partMatch) {
+                    newFileName = `${finalBaseName}${partMatch[1]}`;
+                    if (file === mainFileName) {
+                      newMainFileName = newFileName;
+                    }
+                  } else {
+                    newFileName = `${finalBaseName}.rar`;
+                    newMainFileName = newFileName;
+                  }
+                  
+                  const oldPath = path.join(downloadDir, file);
+                  const newPath = path.join(downloadDir, newFileName);
+                  fs.renameSync(oldPath, newPath);
+                  renamedFiles.push(newFileName);
+                }
+                
+                checkSpinner.succeed(`Kept original RAR files and renamed to standard format: ${newMainFileName}`);
+  
+                // Save renamed rar file name to downloaded.xml database
+                addDownloadedGame({
+                  title: title,
+                  fileName: newMainFileName,
+                  ppsa: ppsa,
+                  password: '',
+                  source: '1fichier',
+                  region: bestLinks.region
+                });
+              }
+            } catch (err) {
+              checkSpinner.fail(`Password check/processing failed: ${err.message}`);
+              logFailure(game.title, game.url, `Password check/processing failed: ${err.message}`);
+              throw err;
             }
           }
         } else {
@@ -177,8 +269,8 @@ async function downloadSingleGame(game) {
         break; // Successfully handled the section, exit loop
       } catch (err) {
         lastError = err;
-        // Clean up partial files downloaded in this attempt
-        if (downloadedFiles && downloadedFiles.length > 0) {
+        // Clean up partial files downloaded in this attempt (only if download didn't complete)
+        if (!downloadCompleted && downloadedFiles && downloadedFiles.length > 0) {
           const downloadDir = process.env.DOWNLOAD_DIR || path.join(__dirname, '../../downloads');
           for (const file of downloadedFiles) {
             try {
@@ -188,7 +280,13 @@ async function downloadSingleGame(game) {
             }
           }
         }
-        logger.warn(`\nAttempt failed for ${regionInfo}: ${err.message}. Trying next available option...`);
+        
+        if (downloadCompleted) {
+          logger.error(`\nAttempt failed after download completion: ${err.message}. Aborting further region attempts.`);
+          break; // Stop trying other regions since we already downloaded the archive
+        } else {
+          logger.warn(`\nAttempt failed for ${regionInfo}: ${err.message}. Trying next available option...`);
+        }
       }
     }
 

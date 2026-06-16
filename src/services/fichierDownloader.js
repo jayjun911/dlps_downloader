@@ -114,10 +114,23 @@ async function download1fichier(fileUrl, destDir, onProgress) {
   filename = filename.replace(/[\\/:*?"<>|]/g, '_');
 
   const destPath = path.join(destDir, filename);
-  const writer = fs.createWriteStream(destPath);
-
-  // ── Step 3: Progress updates ──
   const totalBytes = parseInt(downloadRes.headers['content-length'], 10) || 0;
+
+  // Check if file already exists with same size
+  if (fs.existsSync(destPath) && totalBytes > 0) {
+    try {
+      const stats = fs.statSync(destPath);
+      if (stats.size === totalBytes) {
+        // Destroy the stream to close connection immediately and release resources
+        downloadRes.data.destroy();
+        return { destPath, filename, size: stats.size, skipped: true };
+      }
+    } catch (e) {
+      // If error checking stats, proceed with normal download
+    }
+  }
+
+  const writer = fs.createWriteStream(destPath);
   let receivedBytes = 0;
 
   downloadRes.data.on('data', (chunk) => {

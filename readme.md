@@ -1,6 +1,6 @@
 # PS5 Downloader CLI (`ps5dl`)
 
-`ps5dl` is a Node.js-based Command Line Interface (CLI) utility designed to automate the process of downloading PS5 games from web sources, converting downloaded archives into `.ffpfsc` image formats, and managing your local library metadata. It synchronizes with your LaunchBox database exports to determine which games you still need to download (TBD).
+`ps5dl` is a Node.js-based Command Line Interface (CLI) utility designed to automate the process of downloading PS5 games from web sources, automatically verifying if the downloaded archives are password-protected, extracting them into Folder Format if they are, and managing your local library metadata. It synchronizes with your LaunchBox database exports to determine which games you still need to download (TBD).
 
 ---
 
@@ -10,11 +10,10 @@
 1. [Prerequisites & Preparations](#1-prerequisites--preparations)
    - [LaunchBox Database Export (`PS5.xml`)](#launchbox-database-export-ps5xml)
    - [1fichier API Key Registration](#1fichier-api-key-registration)
-   - [Converter Tool Setup (`ps5-ffpfs-cli`)](#converter-tool-setup-ps5-ffpfs-cli)
 2. [Environment Configuration (`.env`)](#2-environment-configuration-env)
 3. [Installation](#3-installation)
 4. [Command Reference & Usage](#4-command-reference--usage)
-5. [Automatic Download & Conversion Pipeline](#5-automatic-download--conversion-pipeline)
+5. [Automatic Download & Extraction Pipeline](#5-automatic-download--extraction-pipeline)
 
 ---
 
@@ -36,12 +35,6 @@ To allow automated high-speed downloads without browser interactions:
 3. Locate or generate your **API Key** (API Token).
 4. Save this token inside the `.env` file under the key `FICHIER_API_KEY`.
 
-### Converter Tool Setup (`ps5-ffpfs-cli`)
-Downloaded games are usually archived `.rar` packages. The tool uses `ps5-ffpfs-cli` to convert them directly into compressed `.ffpfsc` disk images.
-1. Download or install `ps5-ffpfs-cli` (a Python-based cli tool or standalone binary).
-2. Note down its executable location or python entry file path.
-3. Define the path and arguments in the `.env` file.
-
 ---
 
 ## 2. Environment Configuration (`.env`)
@@ -52,19 +45,14 @@ Create a `.env` file in the root of the project (`C:\Code\PS5_Downloader\.env`) 
 # 1fichier API Key (Do not share this key)
 FICHIER_API_KEY=your_1fichier_api_key_here
 
-# Directory where downloaded files and converted .ffpfsc images will be saved
+# Directory where downloaded files and extracted folders will be saved
 DOWNLOAD_DIR=H:\Download
 
 # Cache expiration for web game list (in hours)
 CACHE_TTL_HOURS=24
-
-# Path to the converter executable (or "python" if running the python script)
-CONVERTER_PATH=python
-
-# Command template arguments for the converter
-# {input}, {output}, and {password} are automatically replaced by the CLI during execution
-CONVERTER_ARGS=C:\path\to\ps5-ffpfs-cli\cli.py {input} {output} --password {password} --overwrite
 ```
+
+*Note: The utility automatically downloads and self-contains the official command-line `unrar.exe` in `bin/` directory on first run, so no external tool installation or configuration is required!*
 
 ---
 
@@ -147,15 +135,17 @@ Exclude specific games from being downloaded during batch/limit runs.
 
 ---
 
-## 5. Automatic Download & Conversion Pipeline
+## 5. Automatic Download & Extraction Pipeline
 
 When you run a download command:
 1. **Turnstile Bypass Scraper**: The tool queries the web pages. It bypasses Cloudflare Turnstile blocks automatically by fetching the page content via the WordPress REST API endpoint or fallback manual HTML caches.
 2. **Link Extraction & Decoding**: It decodes Base64-encrypted secure payloads, handles `clk.sh` short-links, extracts direct download links, and retrieves game region, PPSA codes, and archive passwords.
 3. **Region Priority Routing**: It sorts download options (favoring KOR/KOR-subbed, then USA/EUR) and matches the target PPSA code with your `PS5.xml` database.
 4. **Stream Downloader**: Direct streams are pulled from 1fichier API using simulated browser-like headers to prevent 404/403 blocks.
-5. **Auto conversion**: Once downloading finishes, it extracts the game version (e.g., `v1.00`) and calls `ps5-ffpfs-cli` to compile the `.rar` files directly into a compressed `{Title} [PPSAxxxx][version].ffpfsc` image.
-6. **Disk Cleanup & Logging**: The tool automatically deletes the original `.rar` files to save disk space and logs the downloaded game in `data/downloaded.xml`.
+5. **Password Detection & Extraction**: Once downloading finishes, it runs a password-check on the downloaded archive files.
+   - **If Password-Protected:** It automatically extracts the files into a folder with the same name as the archive (Folder Format) and deletes the original `.rar` files to save disk space.
+   - **If Not Password-Protected:** It keeps the original `.rar` archives intact (ok) as requested.
+6. **Logging**: The tool adds the downloaded game entry (either folder name or archive name) to `data/downloaded.xml`.
 
 ---
 ---
@@ -166,11 +156,10 @@ When you run a download command:
 1. [사전 준비 작업](#1-사전-준비-작업)
    - [LaunchBox 라이브러리 내보내기 (`PS5.xml`)](#launchbox-라이브러리-내보내기-ps5xml)
    - [1fichier API 키 등록](#1fichier-api-키-등록)
-   - [변환 도구 설정 (`ps5-ffpfs-cli`)](#변환-도구-설정-ps5-ffpfs-cli)
 2. [환경 변수 설정 (`.env`)](#2-환경-변수-설정-env)
 3. [설치 방법](#3-설치-방법)
 4. [명령어 사용법](#4-명령어-사용법)
-5. [자동 다운로드 및 변환 프로세스 흐름](#5-자동-다운로드-및-변환-프로세스-흐름)
+5. [자동 다운로드 및 압축 해제 프로세스 흐름](#5-자동-다운로드-및-압축-해제-프로세스-흐름)
 
 ---
 
@@ -192,12 +181,6 @@ CLI 도구를 실행하기 전에 다음 작업이 사전에 완료되어 있어
 3. 개인 **API Key**(API Token)를 복사합니다.
 4. 이 토큰값을 `.env` 파일의 `FICHIER_API_KEY` 항목에 붙여넣습니다.
 
-### 변환 도구 설정 (`ps5-ffpfs-cli`)
-다운로드되는 파일들은 대다수 분할된 `.rar` 압축 아카이브입니다. 이를 마운트 가능한 압축 이미지 포맷(`.ffpfsc`)으로 변환합니다.
-1. `ps5-ffpfs-cli` 파이썬 실행 스크립트 또는 빌드된 실행 바이너리를 준비합니다.
-2. 실행 경로 또는 실행 스크립트(cli.py)의 로컬 경로를 파악합니다.
-3. `.env` 파일에 경로와 실행 아규먼트를 작성합니다.
-
 ---
 
 ## 2. 환경 변수 설정 (`.env`)
@@ -208,23 +191,18 @@ CLI 도구를 실행하기 전에 다음 작업이 사전에 완료되어 있어
 # 1fichier API Key (외부에 노출되지 않도록 주의)
 FICHIER_API_KEY=사용자의_1fichier_api_key_입력
 
-# 다운로드 파일 및 최종 변환본 .ffpfsc가 저장될 타겟 폴더
+# 다운로드 파일 및 압축 해제 폴더가 저장될 타겟 폴더
 DOWNLOAD_DIR=H:\Download
 
 # 웹 크롤링 목록 로컬 캐싱 주기 (시간 단위)
 CACHE_TTL_HOURS=24
-
-# 변환기 실행 파일 (Python 스크립트 구동 시 python 입력)
-CONVERTER_PATH=python
-
-# 변환기 파라미터 템플릿
-# {input}, {output}, {password}는 다운로드 완료 시 CLI가 동적으로 치환합니다.
-CONVERTER_ARGS=C:\path\to\ps5-ffpfs-cli\cli.py {input} {output} --password {password} --overwrite
 ```
+
+*참고: 툴이 처음 실행될 때 공식 `unrar.exe` 콘솔 실행 파일을 프로젝트의 `bin/` 폴더 내에 자동으로 다운로드하여 배치하므로, 사용자가 unrar나 7z을 수동으로 설치하거나 추가 설정하지 않아도 분할 압축 해제가 완벽하게 수행됩니다.*
 
 ---
 
-## 3. Installation
+## 3. 설치 방법
 
 1. 프로젝트 폴더 터미널(`C:\Code\PS5_Downloader`)을 실행합니다.
 2. 필요한 Node.js 의존성 패키지를 설치합니다:
@@ -278,7 +256,7 @@ CONVERTER_ARGS=C:\path\to\ps5-ffpfs-cli\cli.py {input} {output} --password {pass
     ```bash
     ps5dl download --limit 5
     ```
-    *아직 다운로드받지 않은 상위 5개의 게임을 하나씩 순차적으로 자동 다운로드 및 변환 작업을 수행합니다.*
+    *아직 다운로드받지 않은 상위 5개의 게임을 하나씩 순차적으로 자동 다운로드 및 압축 해제 작업을 수행합니다.*
 
 ### 3. 다운로드 제외 관리 (`ps5dl exclude`)
 배치 다운로드 시 다운로드 대상에서 제외할 게임을 등록/해제 관리합니다.
@@ -303,12 +281,14 @@ CONVERTER_ARGS=C:\path\to\ps5-ffpfs-cli\cli.py {input} {output} --password {pass
 
 ---
 
-## 5. 자동 다운로드 및 변환 프로세스 흐름
+## 5. 자동 다운로드 및 압축 해제 프로세스 흐름
 
 `download` 명령을 작동시키면 백그라운드에서 다음 과정이 한 번에 연동 구동됩니다:
 1. **Cloudflare Turnstile 보안 우회**: 웹 상세 정보 크롤링 시 차단 방지를 위해 WordPress REST API 엔드포인트를 호출하거나, 사전에 저장된 수동 로컬 HTML 캐시를 조회하여 Turnstile 봇 탐지 시스템을 원천 우회합니다.
 2. **링크 디코딩 & 파싱**: 암호화된 Base64 페이로드를 디코딩하고 `clk.sh` 단축 링크를 풀어서 원본 1fichier 링크 주소와 압축 비밀번호(`Password: DLPSGAME.COM`)를 자동 파싱합니다.
 3. **PPSA & 지역 우선순위 필터링**: 로컬 `PS5.xml` 내의 타겟 PPSA 코드와 지역 정보(한국어 패치 우선, 이외 USA -> EUR 순)를 대조해 최적의 다운로드 대상을 정렬 선별합니다.
 4. **스트리밍 다운로드**: 봇 차단 필터 방지를 위해 브라우저와 동일한 User-Agent 헤더 정보를 포함하여 1fichier API 다운로드 스트림을 받아 로컬 디스크에 임시 세이브합니다.
-5. **FFPFSC 자동 변환**: 다운로드가 성공하면 파일명에서 버전을 추출(예: `v1.00`)한 다음 `ps5-ffpfs-cli`를 백그라운드 호출해 다운로드 파일과 패스워드를 주입하고, 압축 해제와 압축 변환을 거쳐 `{제목} [PPSAxxxx][version].ffpfsc` 이미지 파일 작성을 자동 완료합니다.
-6. **로컬 청소 및 기록**: 성공적으로 변환이 완료되면 원본 다운로드 압축 파일(`.rar`)을 삭제해 디스크 공간을 확보하고, 다운로드 데이터베이스 `data/downloaded.xml`에 성공 이력을 추가 저장합니다.
+5. **패스워드 확인 및 압축 해제**: 다운로드가 완료되면 임베디드 `unrar.exe`를 사용하여 압축 파일에 비밀번호가 걸려 있는지 테스트합니다.
+   - **패스워드가 걸려 있는 경우:** 해당 비밀번호를 주입하여 파일명과 동일한 이름의 폴더를 만들고 그 내부에 압축을 풉니다(Folder Format). 압축 해제가 완전히 성공적으로 완료되면 하드디스크 용량 확보를 위해 원본 다운로드 `.rar` 파일들을 자동으로 청소(삭제)합니다.
+   - **패스워드가 없는 경우:** 압축을 풀지 않고 원본 `.rar` 파일 구조 그대로 보존(ok)합니다.
+6. **기록**: 다운로드 데이터베이스 `data/downloaded.xml`에 최종 완료된 파일명(폴더명 또는 rar 파일명)을 기록하여 다운로드 완료 상태로 등록합니다.

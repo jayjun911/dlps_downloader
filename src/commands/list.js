@@ -17,6 +17,12 @@ async function listCommand(source = 'all', options = {}) {
     const localGames = loadLocalLibrary();
     const downloadedGames = loadDownloadedGames();
     
+    // Normalize source aliases to support 'dl', 'downloaded', 'down'
+    let normalizedSource = String(source).toLowerCase().trim();
+    if (normalizedSource === 'downloaded' || normalizedSource === 'down') {
+      normalizedSource = 'dl';
+    }
+    
     // Maps of normalized titles for fast lookup
     const localMap = new Map(localGames.map(g => [g.normalizedTitle, g]));
     const dlMap = new Map(downloadedGames.map(g => [g.normalizedTitle, g]));
@@ -27,21 +33,21 @@ async function listCommand(source = 'all', options = {}) {
 
     let displayList = [];
 
-    if (source === 'local') {
+    if (normalizedSource === 'local') {
       displayList = localGames.map(g => ({
         title: g.title,
         ppsa: g.ppsa || '',
         status: 'local',
         normalizedTitle: g.normalizedTitle
       }));
-    } else if (source === 'dl') {
+    } else if (normalizedSource === 'dl') {
       displayList = downloadedGames.map(g => ({
         title: g.title,
         ppsa: g.ppsa || '',
         status: 'downloaded',
         normalizedTitle: g.normalizedTitle
       }));
-    } else if (source === 'web') {
+    } else if (normalizedSource === 'web') {
       const webList = await getWebGameList();
       displayList = webList.map(g => ({
         title: g.title,
@@ -49,14 +55,14 @@ async function listCommand(source = 'all', options = {}) {
         status: 'web',
         normalizedTitle: g.normalizedTitle
       }));
-    } else if (source === 'excluded') {
+    } else if (normalizedSource === 'excluded') {
       displayList = excludedGames.map(g => ({
         title: g.title,
         ppsa: '',
         status: 'excluded',
         normalizedTitle: g.normalizedTitle
       }));
-    } else if (source === 'tbd') {
+    } else if (normalizedSource === 'tbd') {
       const webList = await getWebGameList();
       displayList = webList
         .filter(g => !localMap.has(g.normalizedTitle) && !dlMap.has(g.normalizedTitle) && !excludedSet.has(g.normalizedTitle))
@@ -66,7 +72,7 @@ async function listCommand(source = 'all', options = {}) {
           status: 'tbd',
           normalizedTitle: g.normalizedTitle
         }));
-    } else if (source === 'all') {
+    } else if (normalizedSource === 'all') {
       const webList = await getWebGameList();
       const processedNormalized = new Set();
 

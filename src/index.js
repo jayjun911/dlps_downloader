@@ -14,7 +14,7 @@ program
 
 program
   .command('list')
-  .argument('[source]', 'Game source to display: all, local, dl, web, tbd, excluded', 'all')
+  .argument('[source]', 'Game source to display: all, local, dl/downloaded, web, tbd, excluded', 'all')
   .option('-n, --name <query>', 'Search query for game title or PPSA code')
   .option('-l, --limit <number>', 'Limit the number of displayed results')
   .description('List and search games from local database and web lists')
