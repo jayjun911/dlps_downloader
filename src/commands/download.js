@@ -56,17 +56,7 @@ function detectFileType(fileName) {
     return 'DLC';
   }
   
-  const versionMatch = lower.match(/_?([4-9])xx/i) || lower.match(/([4-9])\.xx/i);
-  if (versionMatch) {
-    return `BACK${versionMatch[1]}xx`;
-  }
 
-  // Only match explicit jailbreak firmware versions to avoid false positives on game versions (like 01.005.400)
-  const fwMatch = lower.match(/(5\.05|6\.72|7\.02|7\.55|9\.00|11\.00|4\.03|4\.50|4\.51|3\.00|3\.20|4\.05)/);
-  if (fwMatch) {
-    const majorDigit = fwMatch[1].split('.')[0];
-    return `BACK${majorDigit}xx`;
-  }
   
   if (lower.includes('backport')) {
     return 'BACK';
@@ -188,7 +178,9 @@ async function downloadSingleGame(game, options = {}) {
               } else {
                 partSpinner.succeed(`Downloaded${typeLabel} part ${partIdx}: ${result.filename}`);
               }
-              downloadedFiles.push(result.filename);
+              const info = bestLinks.urlInfo ? bestLinks.urlInfo.find(ui => ui.url === fileUrl) : null;
+              const type = info ? info.type : 'GAME';
+              downloadedFiles.push({ filename: result.filename, type });
             } catch (downloadErr) {
               partSpinner.fail(`Failed to download${typeLabel} part ${partIdx}: ${downloadErr.message}`);
               logFailure(game.title, game.url, `Download${typeLabel} Part ${partIdx} failed: ${downloadErr.message}`);
@@ -206,7 +198,7 @@ async function downloadSingleGame(game, options = {}) {
             try {
               fs.writeFileSync(guidePath, guideText, 'utf-8');
               logger.success(`Saved DLC installation guide to "${actualFileName}"`);
-              downloadedFiles.push(actualFileName);
+              downloadedFiles.push({ filename: actualFileName, type: 'INSTALL_GUIDE' });
             } catch (err) {
               logger.warn(`Failed to save guide file "${actualFileName}": ${err.message}`);
             }
@@ -223,14 +215,12 @@ async function downloadSingleGame(game, options = {}) {
             
             // 1. Group files by type
             const fileGroups = {};
-            for (const file of downloadedFiles) {
+            for (const fileItem of downloadedFiles) {
+              const file = fileItem.filename;
+              const type = fileItem.type || 'GAME';
               const filePath = path.join(downloadDir, file);
               if (!fs.existsSync(filePath)) continue;
 
-              let type = detectFileType(file);
-              if (type === null) {
-                type = 'GAME';
-              }
               if (!fileGroups[type]) {
                 fileGroups[type] = [];
               }
@@ -435,9 +425,9 @@ async function downloadSingleGame(game, options = {}) {
         // Clean up partial files downloaded in this attempt (only if download didn't complete)
         if (!downloadCompleted && downloadedFiles && downloadedFiles.length > 0) {
           const downloadDir = process.env.DOWNLOAD_DIR || path.join(__dirname, '../../downloads');
-          for (const file of downloadedFiles) {
+          for (const fileItem of downloadedFiles) {
             try {
-              fs.unlinkSync(path.join(downloadDir, file));
+              fs.unlinkSync(path.join(downloadDir, fileItem.filename));
             } catch (e) {
               // ignore delete error
             }

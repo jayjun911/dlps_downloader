@@ -54,11 +54,41 @@ function getHostNameFromUrl(url) {
 /**
  * Detects type of file from paragraph text, url, or label
  */
+/**
+ * Helper to determine if a backport should be dropped (if firmware < 7.00).
+ */
+function shouldDropBackport(text, url = '', label = '') {
+  const lower = (text + ' ' + url + ' ' + label).toLowerCase();
+  
+  // Find all firmware versions mentioned
+  const versions = [];
+  const matches = lower.match(/\b(3|4|5|6|7|8|9|10|11)\.(?:xx|[0-9]+)\b/g) || [];
+  const xxMatches = lower.match(/\b(3|4|5|6|7|8|9|10|11)xx\b/g) || [];
+  
+  for (const m of matches.concat(xxMatches)) {
+    const numMatch = m.match(/\d+/);
+    if (numMatch) {
+      versions.push(parseInt(numMatch[0], 10));
+    }
+  }
+  
+  if (versions.length > 0) {
+    // Keep only if at least one firmware is >= 7
+    return !versions.some(v => v >= 7);
+  }
+  
+  // Default: if no firmware is mentioned, drop it (safer for PS5 <7.00 backports)
+  return true;
+}
+
+/**
+ * Detects type of file from paragraph text, url, or label
+ */
 function detectTypeFromText(text, url = '', label = '') {
   const lower = (text + ' ' + url + ' ' + label).toLowerCase();
   if (lower.includes('unlock')) return 'UNLOCK';
   if (lower.includes('dlc')) return 'DLC';
-  if (lower.includes('backport') || lower.match(/_?([4-9])xx/i) || lower.match(/([4-9])\.xx/i)) return 'BACKPORT';
+  if (lower.includes('backport')) return 'BACKPORT';
   if (lower.includes('patch') || lower.includes('update') || lower.includes('fix')) return 'UPDATE';
   if (lower.includes('guide') || lower.includes('readme') || lower.includes('instruction')) return 'INSTALL_GUIDE';
   if (lower.includes('game')) return 'GAME';
@@ -101,6 +131,9 @@ function decodeAndExtractLinks(base64Payload) {
         
         if (trimmedUrl && !EXCLUDED_DOMAINS.some(domain => trimmedUrl.includes(domain))) {
           const type = detectTypeFromText('', trimmedUrl, '');
+          if (type === 'BACKPORT' && shouldDropBackport('', trimmedUrl, '')) {
+            continue; // Drop backports for firmware < 7.00
+          }
           groups.push({
             type,
             links: [{ label: 'Link', url: trimmedUrl }]
@@ -160,6 +193,9 @@ function decodeAndExtractLinks(base64Payload) {
 
     if (blockLinks.length > 0) {
       const type = detectTypeFromText(blockText || $(blockEl).text());
+      if (type === 'BACKPORT' && shouldDropBackport(blockText || $(blockEl).text())) {
+        return; // Drop backports for firmware < 7.00
+      }
       groups.push({ type, links: blockLinks });
     }
   });
