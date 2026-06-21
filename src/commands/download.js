@@ -309,9 +309,10 @@ async function downloadSingleGame(game, options = {}) {
         lastError = err;
         const isExfatSection = section.region.toUpperCase().includes('EXFAT');
         const downloadDir = options.out || process.env.DOWNLOAD_DIR || path.join(__dirname, '../../downloads');
+        const downloadStarted = downloadedFiles && downloadedFiles.length > 0;
 
         // Clean up partial files (or rename .exfat to .failed for exFAT sections)
-        if (!downloadCompleted && downloadedFiles && downloadedFiles.length > 0) {
+        if (!downloadCompleted && downloadStarted) {
           for (const fileItem of downloadedFiles) {
             const filePath = path.join(downloadDir, fileItem.filename);
             try {
@@ -330,8 +331,35 @@ async function downloadSingleGame(game, options = {}) {
           }
         }
 
-        // Also scan downloadDir for any .exfat files left by the downloader (e.g. partial writes)
-        if (isExfatSection && fs.existsSync(downloadDir)) {
+        if (downloadCompleted) {
+          // Post-download processing failed — don't retry
+          logger.error(`\nAttempt failed after download completion: ${err.message}. Aborting further region attempts.`);
+          sectionDone = true;
+          break;
+        } else if (err.isLinkDead && currentHostName) {
+          if (isExfatSection && downloadStarted) {
+            // Partial exFAT data was written before link died — rename and abort
+            try {
+              for (const f of fs.readdirSync(downloadDir)) {
+                if (f.toLowerCase().endsWith('.exfat')) {
+                  const fp = path.join(downloadDir, f);
+                  const failedFp = fp.replace(/\.exfat$/i, '.failed');
+                  fs.renameSync(fp, failedFp);
+                  logger.warn(`Renamed failed exFAT: ${path.basename(failedFp)}`);
+                }
+              }
+            } catch (e) {}
+            sectionDone = true;
+            const exfatErr = new Error(`exFAT download failed (${regionInfo}): ${err.message}`);
+            exfatErr.isHandled = true;
+            throw exfatErr;
+          }
+          // No partial data — skip this host and retry section with next available host
+          skipHosts.push(currentHostName);
+          logger.warn(`\n[${regionInfo}] ${currentHostName} link is dead. Trying next available host...`);
+          downloadedFiles = [];
+        } else if (isExfatSection && downloadStarted) {
+          // exFAT download started but failed (non-link-dead error) — cleanup and abort
           try {
             for (const f of fs.readdirSync(downloadDir)) {
               if (f.toLowerCase().endsWith('.exfat')) {
@@ -342,23 +370,14 @@ async function downloadSingleGame(game, options = {}) {
               }
             }
           } catch (e) {}
-
-          // exFAT failure: do NOT try other sections — skip this game entirely
           sectionDone = true;
           const exfatErr = new Error(`exFAT download failed (${regionInfo}): ${err.message}`);
+          exfatErr.isHandled = true;
           throw exfatErr;
-        }
-
-        if (downloadCompleted) {
-          logger.error(`\nAttempt failed after download completion: ${err.message}. Aborting further region attempts.`);
+        } else if (isExfatSection && !downloadStarted) {
+          // No links at all for this exFAT section — skip to next section
+          logger.warn(`No downloadable links for exFAT section [${section.region}] — trying next section`);
           sectionDone = true;
-          break;
-        } else if (err.isLinkDead && currentHostName) {
-          // Link is dead — skip this host and retry the same section with the next best host
-          skipHosts.push(currentHostName);
-          logger.warn(`\n[${regionInfo}] ${currentHostName} link is dead. Trying next available host...`);
-          downloadedFiles = [];
-          // continue inner while loop
         } else {
           logger.warn(`\nAttempt failed for ${regionInfo}: ${err.message}. Trying next available option...`);
           sectionDone = true;
@@ -381,9 +400,10 @@ async function downloadSingleGame(game, options = {}) {
     }
 
   } catch (err) {
-    if (!err.isUserError) {
+    if (!err.isUserError && !err.isHandled) {
       spinner.fail(`Download failed for "${game.title}": ${err.message}`);
       logFailure(game.title, game.url, err.message);
+      err.isHandled = true;
     }
     throw err;
   }
@@ -542,10 +562,8 @@ async function downloadCommand(titleQuery, options = {}) {
     });
 
   } catch (err) {
-    if (err.isUserError) {
+    if (!err.isHandled) {
       logger.error(err.message);
-    } else {
-      logger.error('Download command failed.', err);
     }
   }
 }

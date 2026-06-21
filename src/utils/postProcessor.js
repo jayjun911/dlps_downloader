@@ -1,7 +1,7 @@
 const path = require('path');
 const fs = require('fs');
 const ora = require('ora');
-const { extractRarArchive, getGameInfoFromArchive, compressFolderTo7z, compressFileTo7z, findWorkingPassword, sanitizeFileName } = require('../services/unrarService');
+const { archiveContainsExfat, extractRarArchive, getGameInfoFromArchive, compressFolderTo7z, compressFileTo7z, findWorkingPassword, sanitizeFileName } = require('../services/unrarService');
 const { addDownloadedGame } = require('../services/downloadedDb');
 const logger = require('./logger');
 
@@ -83,14 +83,20 @@ async function processExfatArchive({ archiveSet, type, downloadDir, password, in
   const mainFilePath = path.join(downloadDir, mainFileName);
 
   // 1. Detect working password
+  const pwdSpinner = ora(`[${type}] Checking encryption...`).start();
   let workingPassword = '';
   try {
     workingPassword = await findWorkingPassword(mainFilePath, password ? [password] : []);
   } catch (e) { /* no password needed */ }
   const encrypted = workingPassword !== '';
+  if (encrypted) {
+    pwdSpinner.succeed(`[${type}] Encrypted — password found`);
+  } else {
+    pwdSpinner.succeed(`[${type}] Not encrypted`);
+  }
 
-  // 2. Extract archive to temp folder
-  const tempFolder = path.join(downloadDir, `__exfat_tmp_${Date.now()}`);
+  // 2. Extract archive to a named folder beside the source file
+  const tempFolder = path.join(downloadDir, path.basename(mainFileName, path.extname(mainFileName)));
   const extractSpinner = ora(`[${type}] Extracting exFAT archive${encrypted ? ' (encrypted)' : ''}...`).start();
   try {
     await extractRarArchive(mainFilePath, tempFolder, workingPassword, { skipEbootFlatten: true });
@@ -293,7 +299,7 @@ async function processDownloadedFiles({
   let finalPpsa  = initialPpsa;
   let finalVer   = 'v01.00';
 
-  const isExfatRegion = (region || '').toUpperCase().includes('EXFAT');
+  let isExfatRegion = (region || '').toUpperCase().includes('EXFAT');
 
   // Group files by type
   const fileGroups = {};
@@ -305,8 +311,25 @@ async function processDownloadedFiles({
     fileGroups[type].push(fileItem.filename);
   }
 
+  // Auto-detect exFAT: if a GAME archive contains a .exfat file inside, treat as exFAT region
+  if (!isExfatRegion) {
+    const gameArchives = (fileGroups['GAME'] || []).filter(isArchiveFile);
+    if (gameArchives.length > 0) {
+      const mainArchive = findMainArchiveFile(gameArchives);
+      if (mainArchive) {
+        const detectSpinner = ora(`Checking archive contents...`).start();
+        const hasExfat = archiveContainsExfat(path.join(downloadDir, mainArchive));
+        if (hasExfat) {
+          isExfatRegion = true;
+          detectSpinner.succeed(`Detected exFAT image inside archive — switching to exFAT pipeline`);
+        } else {
+          detectSpinner.stop();
+        }
+      }
+    }
+  }
+
   // For non-exFAT regions, read metadata from the GAME archive before processing
-  // (exFAT archives don't contain param.json at the archive root — it lives inside the .exfat image)
   if (!isExfatRegion) {
     const gameArchives = (fileGroups['GAME'] || []).filter(isArchiveFile);
     if (gameArchives.length > 0) {

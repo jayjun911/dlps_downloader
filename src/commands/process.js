@@ -1,25 +1,17 @@
 const fs = require('fs');
 const path = require('path');
-const ora = require('ora');
-const { loadLocalLibrary } = require('../services/localLibrary');
 const { processDownloadedFiles } = require('../utils/postProcessor');
 const logger = require('../utils/logger');
 
 /**
- * Parses a PPSA code from a filename, e.g. "[DLPSGAME.COM]-PPSA26786.part01.rar" → "PPSA26786"
- */
-function parsePpsaFromFilename(filename) {
-  const m = filename.match(/PPSA\d+/i);
-  return m ? m[0].toUpperCase() : null;
-}
-
-/**
  * ps5dl process <filepath> [--password <pw>]
  *
- * Manually runs the post-processing pipeline on a downloaded file:
- *   - .exfat           → mount/validate + rename + compress to .7z
- *   - .rar/.zip/.7z    → extract + rename + compress
- * PPSA is parsed from filename; title looked up from local library.
+ * Flow:
+ *   1. Is the file a raw .exfat?       → exFAT pipeline (mount → validate → compress)
+ *   2. Is it a compressed archive?
+ *        → contains .exfat inside?     → exFAT pipeline (extract → mount → validate → compress)
+ *        → contains PS5 game files?    → standard pipeline (extract → compress)
+ *   Title / PPSA / version come from param.json inside the content, not the filename.
  */
 async function processCommand(filePath, options = {}) {
   const absPath = path.resolve(filePath);
@@ -32,23 +24,7 @@ async function processCommand(filePath, options = {}) {
   const filename = path.basename(absPath);
   const downloadDir = path.dirname(absPath);
   const ext = path.extname(filename).toLowerCase();
-
-  // Detect exFAT
-  const isExfat = ext === '.exfat';
-
-  // Parse PPSA from filename
-  const ppsa = parsePpsaFromFilename(filename);
-
-  // Look up title from local library
-  let title = 'Unknown Game';
-  if (ppsa) {
-    const localGames = loadLocalLibrary();
-    const match = localGames.find(g => g.ppsa === ppsa);
-    if (match) title = match.title;
-  }
-
-  const spinner = ora(`Processing "${filename}"...`).start();
-  spinner.info(`PPSA: ${ppsa || 'unknown'}, Title: ${title}, exFAT: ${isExfat}`);
+  const isRawExfat = ext === '.exfat';
 
   try {
     const { registeredFiles, finalTitle, finalPpsa, finalVer } = await processDownloadedFiles({
@@ -56,9 +32,9 @@ async function processCommand(filePath, options = {}) {
       downloadDir,
       password: options.password || '',
       hostName: 'Manual',
-      region: isExfat ? 'USA (exFAT)' : 'USA',
-      initialTitle: title,
-      initialPpsa: ppsa || 'Unknown',
+      region: isRawExfat ? 'USA (exFAT)' : 'USA',
+      initialTitle: 'Unknown Game',
+      initialPpsa: 'Unknown',
     });
 
     logger.success(`Done: ${finalTitle} [${finalPpsa}][${finalVer}]`);
@@ -66,8 +42,7 @@ async function processCommand(filePath, options = {}) {
       registeredFiles.forEach(f => logger.info(`Registered: ${f.fileName}`));
     }
   } catch (err) {
-    spinner.fail(`Processing failed: ${err.message}`);
-    logger.error('Process command failed.', err);
+    logger.error(`Processing failed: ${err.message}`);
     process.exit(1);
   }
 }

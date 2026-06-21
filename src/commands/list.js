@@ -98,7 +98,7 @@ async function listCommand(source = 'all', options = {}) {
       for (const wg of webList) {
         processedNormalized.add(wg.normalizedTitle);
         
-        const matchInfo = getWebGameStatus(wg, localMap, dlMap, excludedSet, localPpsaMap, dlPpsaMap);
+        const matchInfo = getWebGameStatus(wg, localMap, dlMap, excludedSet, localPpsaMap, dlPpsaMap, progressSet);
         
         displayList.push({
           title: wg.title,

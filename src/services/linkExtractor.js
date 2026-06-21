@@ -35,8 +35,8 @@ const HOST_PRIORITY_PATTERNS = [
   /1fichier\.com|1file/i,
   /datanodes\.to/i,
   /mediafire\.com/i,
-  /akirabox\.com|akia/i,
   /vikingfile\.com|viki/i,
+  /akirabox\.com|akia/i,
   /mega\.nz|mega\.co\.nz/i,
   /rootz\.so/i,
   /buzzheavier\.com|buznew/i
@@ -343,13 +343,14 @@ async function getBestDownloadLinks(sections, targetPPSA, { skipHosts = [] } = {
         // Add direct links as candidates
         candidates = candidates.concat(directLinks);
 
-        // Resolve reroute URLs
-        for (const reroute of rerouteLinks) {
+        // Resolve reroute URLs — deduplicate same URL (e.g. Akia/Viki/Data all pointing to same archive)
+        const uniqueRerouteUrls = [...new Set(rerouteLinks.map(l => l.url))];
+        for (const url of uniqueRerouteUrls) {
           try {
-            const resolved = await resolveReroute(reroute.url);
+            const resolved = await resolveReroute(url);
             candidates = candidates.concat(resolved);
           } catch (e) {
-            logger.warn(`Reroute resolution failed for ${reroute.url}: ${e.message}`);
+            logger.warn(`Reroute resolution failed for ${url}: ${e.message}`);
           }
         }
 
@@ -443,12 +444,13 @@ async function getBestDownloadLinks(sections, targetPPSA, { skipHosts = [] } = {
           const directLinks = group.links.filter(l => !l.url.includes(REROUTE_DOMAIN));
           const rerouteLinks = group.links.filter(l => l.url.includes(REROUTE_DOMAIN));
           candidates = candidates.concat(directLinks);
-          for (const reroute of rerouteLinks) {
+          const uniqueRerouteUrls = [...new Set(rerouteLinks.map(l => l.url))];
+          for (const url of uniqueRerouteUrls) {
             try {
-              const resolved = await resolveReroute(reroute.url);
+              const resolved = await resolveReroute(url);
               candidates = candidates.concat(resolved);
             } catch (e) {
-              logger.warn(`Reroute resolution failed for ${reroute.url}: ${e.message}`);
+              logger.warn(`Reroute resolution failed for ${url}: ${e.message}`);
             }
           }
           const allowedCandidates = candidates.filter(cand =>
