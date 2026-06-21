@@ -28,9 +28,11 @@ program
   .argument('[title]', 'Title of the game to download')
   .option('-l, --limit <number>', 'Batch download first N games from TBD list')
   .option('-t, --type <string>', 'Download only specific file types (e.g. GAME, DLC, BACKPORT, UPDATE)')
+  .option('-s, --section', 'Interactively select a section from the available list')
   .option('-c, --completed', 'Mark the game as completed/downloaded without downloading it')
   .option('-p, --password <string>', 'Override archive password (used when auto-detection fails)')
   .option('-o, --out <path>', 'Override the default download directory')
+  .option('-e, --exfat', 'If an exFAT section exists, use it exclusively (no fallback to non-exFAT)')
   .description('Download a specific game or a batch of games from TBD list')
   .action((title, options) => {
     downloadCommand(title, options);
@@ -69,6 +71,16 @@ program
   .action((query) => {
     const dupeCommand = require('./commands/dupe');
     dupeCommand(query);
+  });
+
+program
+  .command('process')
+  .argument('<filepath>', 'Path to a downloaded .exfat or archive file (.rar/.zip/.7z)')
+  .option('-p, --password <string>', 'Archive password (if needed)')
+  .description('Post-process a manually downloaded file: validate, rename, compress, register')
+  .action((filepath, options) => {
+    const processCommand = require('./commands/process');
+    processCommand(filepath, options);
   });
 
 program

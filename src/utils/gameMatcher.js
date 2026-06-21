@@ -34,7 +34,7 @@ function getCachedSubpagePpsas(slug) {
  * @param {Map} dlPpsaMap Map of PPSA to downloaded game
  * @returns {{status: string, ppsa: string}}
  */
-function getWebGameStatus(webGame, localMap, dlMap, excludedSet, localPpsaMap, dlPpsaMap) {
+function getWebGameStatus(webGame, localMap, dlMap, excludedSet, localPpsaMap, dlPpsaMap, progressSet = null) {
   // 1. Direct title matching
   if (dlMap.has(webGame.normalizedTitle)) {
     return { status: 'downloaded', ppsa: dlMap.get(webGame.normalizedTitle).ppsa || '' };
@@ -55,6 +55,11 @@ function getWebGameStatus(webGame, localMap, dlMap, excludedSet, localPpsaMap, d
     if (localPpsaMap.has(ppsa)) {
       return { status: 'local', ppsa };
     }
+  }
+
+  // 3. In-progress check
+  if (progressSet && progressSet.has(webGame.normalizedTitle)) {
+    return { status: 'progress', ppsa: '' };
   }
 
   return { status: 'tbd', ppsa: '' };

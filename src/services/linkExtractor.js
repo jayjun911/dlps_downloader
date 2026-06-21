@@ -1,5 +1,6 @@
 const cheerio = require('cheerio');
 const { resolveReroute } = require('./rerouteResolver');
+const logger = require('../utils/logger');
 
 const EXCLUDED_DOMAINS = [
   'downloadgameps3.com',  // Guide/Tool links
@@ -300,16 +301,18 @@ async function getBestDownloadLinks(sections, targetPPSA, { skipHosts = [] } = {
   // 2. Sort by region priority
   matchingSections.sort((a, b) => getRegionPriority(a.region) - getRegionPriority(b.region));
 
+  const firmwareMismatchSections = [];
+
   // Try each region section in order of priority (in case of failure to extract/resolve)
   for (const section of matchingSections) {
     try {
       const { groups, password, firmwareRequirement } = decodeAndExtractLinks(section.base64Payload);
-
       // 3. Firmware compatibility check
       if (firmwareRequirement !== null) {
         // Content has an explicit "Works on X.xx and higher" note — use it
         if (firmwareRequirement > userFirmware) {
-          // This section requires higher firmware than user has → skip
+          logger.warn(`[${section.region}] Requires firmware ${firmwareRequirement}.xx but USER_FIRMWARE=${userFirmware} — saving as fallback`);
+          firmwareMismatchSections.push({ section, groups, password, firmwareRequirement });
           continue;
         }
         // firmwareRequirement <= userFirmware → compatible, proceed
@@ -346,7 +349,7 @@ async function getBestDownloadLinks(sections, targetPPSA, { skipHosts = [] } = {
             const resolved = await resolveReroute(reroute.url);
             candidates = candidates.concat(resolved);
           } catch (e) {
-            // Ignore reroute resolution failure
+            logger.warn(`Reroute resolution failed for ${reroute.url}: ${e.message}`);
           }
         }
 
@@ -356,6 +359,9 @@ async function getBestDownloadLinks(sections, targetPPSA, { skipHosts = [] } = {
         });
 
         if (allowedCandidates.length === 0) {
+          if (candidates.length > 0) {
+            logger.warn(`[${section.region}] Group "${group.type}" has ${candidates.length} link(s) but none are supported hosts: ${candidates.map(c => c.url).join(', ')}`);
+          }
           continue;
         }
 
@@ -418,7 +424,66 @@ async function getBestDownloadLinks(sections, targetPPSA, { skipHosts = [] } = {
         ppsa: section.ppsa
       };
     } catch (err) {
-      // Try next region section
+      logger.warn(`[${section.region}] Section processing error: ${err.message}`);
+    }
+  }
+
+  // No compatible section found — retry with firmware-mismatched sections as last resort
+  if (firmwareMismatchSections.length > 0) {
+    logger.warn(`No firmware-compatible section found. Falling back to firmware-mismatched section(s) (update USER_FIRMWARE in .env if needed).`);
+    for (const { section, groups, password, firmwareRequirement } of firmwareMismatchSections) {
+      logger.info(`Analyzing fallback: ${section.ppsa} – ${section.region} (firmware ${firmwareRequirement}.xx)`);
+      try {
+        let finalUrls = [];
+        let finalUrlInfos = [];
+        let selectedHostNames = new Set();
+
+        for (const group of groups) {
+          let candidates = [];
+          const directLinks = group.links.filter(l => !l.url.includes(REROUTE_DOMAIN));
+          const rerouteLinks = group.links.filter(l => l.url.includes(REROUTE_DOMAIN));
+          candidates = candidates.concat(directLinks);
+          for (const reroute of rerouteLinks) {
+            try {
+              const resolved = await resolveReroute(reroute.url);
+              candidates = candidates.concat(resolved);
+            } catch (e) {
+              logger.warn(`Reroute resolution failed for ${reroute.url}: ${e.message}`);
+            }
+          }
+          const allowedCandidates = candidates.filter(cand =>
+            cand.url.startsWith('text_guide:') || getHostPriority(cand.url) < HOST_PRIORITY_PATTERNS.length
+          );
+          if (allowedCandidates.length === 0) continue;
+          const downloadCandidates = allowedCandidates.filter(c => !c.url.startsWith('text_guide:'));
+          if (downloadCandidates.length > 0) {
+            const groupedByHost = {};
+            for (const cand of downloadCandidates) {
+              const idx = getHostPriority(cand.url);
+              if (!groupedByHost[idx]) groupedByHost[idx] = [];
+              if (!groupedByHost[idx].includes(cand.url)) groupedByHost[idx].push(cand.url);
+            }
+            const sortedKeys = Object.keys(groupedByHost).map(Number).sort((a, b) => a - b)
+              .filter(k => !skipHosts.includes(getHostNameFromUrl(groupedByHost[k][0])));
+            if (sortedKeys.length > 0) {
+              for (const url of groupedByHost[sortedKeys[0]]) {
+                if (!finalUrls.includes(url)) {
+                  finalUrls.push(url);
+                  finalUrlInfos.push({ url, type: group.type });
+                  selectedHostNames.add(getHostNameFromUrl(url));
+                }
+              }
+            }
+          }
+        }
+
+        if (finalUrls.length === 0) continue;
+        const hostList = Array.from(selectedHostNames);
+        const hostName = hostList.includes('1fichier') ? '1fichier' : (hostList[0] || 'Other');
+        return { urls: finalUrls, urlInfo: finalUrlInfos, password, region: section.region, hostName, ppsa: section.ppsa };
+      } catch (err) {
+        logger.warn(`[${section.region}] Firmware-fallback error: ${err.message}`);
+      }
     }
   }
 

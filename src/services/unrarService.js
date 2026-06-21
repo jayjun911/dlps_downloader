@@ -200,7 +200,7 @@ async function isArchiveEncrypted(rarFilePath) {
  * @param {string} password Archive password
  * @returns {Promise<void>}
  */
-async function extractRarArchive(rarFilePath, destFolder, password) {
+async function extractRarArchive(rarFilePath, destFolder, password, { skipEbootFlatten = false } = {}) {
   const isZip = rarFilePath.toLowerCase().endsWith('.zip');
   const is7z = rarFilePath.toLowerCase().endsWith('.7z');
 
@@ -250,11 +250,12 @@ async function extractRarArchive(rarFilePath, destFolder, password) {
     execSync(cmd, { stdio: 'inherit' });
   }
 
-  // Automatically flatten the folder structure so that the folder containing eboot.bin is at the root
-  try {
-    flattenFolderToEboot(destFolder);
-  } catch (err) {
-    logger.warn(`Failed to flatten folder structure to eboot.bin: ${err.message}`);
+  if (!skipEbootFlatten) {
+    try {
+      flattenFolderToEboot(destFolder);
+    } catch (err) {
+      logger.warn(`Failed to flatten folder structure to eboot.bin: ${err.message}`);
+    }
   }
 }
 
@@ -442,12 +443,15 @@ async function getGameInfoFromArchive(rarFilePath, password) {
     // Step 1: List archive contents to find param.json's exact internal path.
     // UnRAR's * wildcard does not cross path separators, so "*param.json" fails to match
     // "sce_sys\param.json". We must find the exact path via lb then use "e" to extract it.
+    const parseLbOutput = (out) => (out || '').split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+
     let fileList = [];
     try {
-      const listOutput = execSync(`"${unrarPath}" lb -y -p- "${rarFilePath}"`, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'] });
-      fileList = listOutput.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+      fileList = parseLbOutput(execSync(`"${unrarPath}" lb -y -p- "${rarFilePath}"`, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }));
     } catch (err) {
-      encrypted = true;
+      // lb exits non-zero on warnings even when listing succeeds — use stdout if available
+      fileList = parseLbOutput(err.stdout);
+      if (fileList.length === 0) encrypted = true;
     }
 
     const candidates = [];
@@ -461,16 +465,17 @@ async function getGameInfoFromArchive(rarFilePath, password) {
     if (encrypted && fileList.length === 0) {
       for (const cand of candidates) {
         try {
-          const listOutput = execSync(`"${unrarPath}" lb -y -p"${cand}" "${rarFilePath}"`, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'] });
-          fileList = listOutput.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+          fileList = parseLbOutput(execSync(`"${unrarPath}" lb -y -p"${cand}" "${rarFilePath}"`, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }));
           if (fileList.length > 0) break;
-        } catch (e) { /* try next */ }
+        } catch (e) {
+          fileList = parseLbOutput(e.stdout);
+          if (fileList.length > 0) break;
+        }
       }
     }
 
     // Find param.json's exact path inside the archive (match by filename only)
     const paramJsonInternal = fileList.find(l => path.basename(l).toLowerCase() === 'param.json');
-
     // Step 2: Extract param.json using "e" (flat extract — no path issues).
     // Try without password first, then each candidate.
     const extractCandidates = encrypted ? candidates : ['', ...candidates];
@@ -489,8 +494,9 @@ async function getGameInfoFromArchive(rarFilePath, password) {
           workingPassword = cand;
           break;
         }
+        logger.warn(`[getGameInfo] pwd="${cand||'(none)'}" — extracted but param.json not in ${tempDir}`);
       } catch (err) {
-        // Wrong password or extraction error, try next candidate
+        logger.warn(`[getGameInfo] pwd="${cand||'(none)'}" — extraction threw: ${err.message}`);
       }
     }
   }
@@ -621,13 +627,15 @@ async function findWorkingPassword(rarFilePath, passwordCandidates = []) {
 
   // Step 1: List files without password to detect header encryption and find a test file.
   // Using "e" + exact file path avoids the * wildcard / path-separator issue in "t" / "x".
+  const parseLbOut = (out) => (out || '').split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+
   let headersEncrypted = false;
   let fileList = [];
   try {
-    const listOutput = execSync(`"${unrarPath}" lb -y -p- "${rarFilePath}"`, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'] });
-    fileList = listOutput.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+    fileList = parseLbOut(execSync(`"${unrarPath}" lb -y -p- "${rarFilePath}"`, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }));
   } catch (err) {
-    headersEncrypted = true;
+    fileList = parseLbOut(err.stdout);
+    if (fileList.length === 0) headersEncrypted = true;
   }
 
   // Prefer param.json (small) as test file; fall back to first regular file
@@ -640,9 +648,11 @@ async function findWorkingPassword(rarFilePath, passwordCandidates = []) {
   if (headersEncrypted) {
     for (const cand of candidates) {
       try {
-        execSync(`"${unrarPath}" lb -y -p"${cand}" "${rarFilePath}"`, { stdio: 'ignore' });
-        return cand;
-      } catch (e) { /* try next */ }
+        const out = parseLbOut(execSync(`"${unrarPath}" lb -y -p"${cand}" "${rarFilePath}"`, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }));
+        if (out.length > 0) return cand;
+      } catch (e) {
+        if (parseLbOut(e.stdout).length > 0) return cand;
+      }
     }
     return '';
   }
@@ -689,8 +699,8 @@ async function compressFolderTo7z(folderPath, dest7zPath) {
     throw new Error(`Bandizip (bz.exe) not found at: ${BZ_EXE_PATH}`);
   }
 
-  const cmd = `"${BZ_EXE_PATH}" a -r -fmt:7z -l:7 -y "${dest7zPath}" "${folderPath}\\*"`;
-  logger.info(`Executing Bandizip: bz a -r -fmt:7z -l:7 -y "${path.basename(dest7zPath)}" "${path.basename(folderPath)}\\*"`);
+  const cmd = `"${BZ_EXE_PATH}" a -r -fmt:7z -l:5 -y "${dest7zPath}" "${folderPath}\\*"`;
+  logger.info(`Executing Bandizip: bz a -r -fmt:7z -l:5 -y "${path.basename(dest7zPath)}" "${path.basename(folderPath)}\\*"`);
   execSync(cmd, { stdio: 'inherit' });
 }
 
@@ -706,8 +716,8 @@ async function compressFileTo7z(filePath, dest7zPath) {
     throw new Error(`Bandizip (bz.exe) not found at: ${BZ_EXE_PATH}`);
   }
 
-  const cmd = `"${BZ_EXE_PATH}" a -fmt:7z -l:7 -y "${dest7zPath}" "${filePath}"`;
-  logger.info(`Executing Bandizip: bz a -fmt:7z -l:7 -y "${path.basename(dest7zPath)}" "${path.basename(filePath)}"`);
+  const cmd = `"${BZ_EXE_PATH}" a -fmt:7z -l:5 -y "${dest7zPath}" "${filePath}"`;
+  logger.info(`Executing Bandizip: bz a -fmt:7z -l:5 -y "${path.basename(dest7zPath)}" "${path.basename(filePath)}"`);
   execSync(cmd, { stdio: 'inherit' });
 }
 

@@ -45,9 +45,9 @@ function parseParamJson(driveLetter) {
     const locale = locParams[defLang] || locParams['en-US'] || Object.values(locParams).find(v => v && v.titleName) || {};
 
     return {
-      titleId:   (json.titleId || '').trim(),
+      titleId: (json.titleId || '').trim(),
       titleName: (locale.titleName || '').trim(),
-      version:   json.applicationVersion ? `v${json.applicationVersion}` : 'v01.00'
+      version: json.applicationVersion ? `v${json.applicationVersion}` : 'v01.00'
     };
   } catch (e) {
     return null;

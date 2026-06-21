@@ -93,7 +93,7 @@ async function processExfatArchive({ archiveSet, type, downloadDir, password, in
   const tempFolder = path.join(downloadDir, `__exfat_tmp_${Date.now()}`);
   const extractSpinner = ora(`[${type}] Extracting exFAT archive${encrypted ? ' (encrypted)' : ''}...`).start();
   try {
-    await extractRarArchive(mainFilePath, tempFolder, workingPassword);
+    await extractRarArchive(mainFilePath, tempFolder, workingPassword, { skipEbootFlatten: true });
     if (!fs.existsSync(tempFolder) || fs.readdirSync(tempFolder).length === 0) {
       throw new Error('Extraction output is empty');
     }
@@ -261,8 +261,6 @@ async function processRawExfat({ filename, type, downloadDir, initialTitle, init
       throw new Error('Output 7z is empty');
     }
     compressSpinner.succeed(`[${type}] Compressed: ${baseName}.7z`);
-    // Source .exfat is now inside the .7z — remove it
-    try { fs.unlinkSync(renamedPath); } catch (e) {}
     return { registeredFile: { fileName: `${baseName}.7z`, type }, metadata };
   } catch (compErr) {
     compressSpinner.fail(`[${type}] Compression failed: ${compErr.message}. Keeping .exfat.`);

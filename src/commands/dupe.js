@@ -81,7 +81,7 @@ async function dupeCommand(query) {
       // Find all TBD web games
       targetWebGames = [];
       for (const g of webGames) {
-        const matchInfo = getWebGameStatus(g, localMap, dlMap, excludedSet, localPpsaMap, dlPpsaMap);
+        const matchInfo = getWebGameStatus(g, localMap, dlMap, excludedSet, localPpsaMap, dlPpsaMap, null);
         if (matchInfo.status === 'tbd') {
           targetWebGames.push(g);
         }

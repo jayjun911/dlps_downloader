@@ -1,6 +1,7 @@
 const { loadLocalLibrary } = require('../services/localLibrary');
 const { loadDownloadedGames } = require('../services/downloadedDb');
 const { getWebGameList } = require('../services/webScraper');
+const { loadProgressSet } = require('../services/progressDb');
 const logger = require('../utils/logger');
 const chalk = require('chalk');
 
@@ -24,6 +25,7 @@ async function listCommand(source = 'all', options = {}) {
     }
     
     const { getWebGameStatus } = require('../utils/gameMatcher');
+    const progressSet = loadProgressSet();
 
     // Maps of normalized titles for fast lookup
     const localMap = new Map(localGames.map(g => [g.normalizedTitle, g]));
@@ -78,7 +80,7 @@ async function listCommand(source = 'all', options = {}) {
       const webList = await getWebGameList();
       displayList = [];
       for (const g of webList) {
-        const matchInfo = getWebGameStatus(g, localMap, dlMap, excludedSet, localPpsaMap, dlPpsaMap);
+        const matchInfo = getWebGameStatus(g, localMap, dlMap, excludedSet, localPpsaMap, dlPpsaMap, progressSet);
         if (matchInfo.status === 'tbd') {
           displayList.push({
             title: g.title,
@@ -178,6 +180,7 @@ async function listCommand(source = 'all', options = {}) {
       else if (game.status === 'downloaded') statusStr = chalk.green(statusStr);
       else if (game.status === 'tbd') statusStr = chalk.yellow(statusStr);
       else if (game.status === 'excluded') statusStr = chalk.red(statusStr);
+      else if (game.status === 'progress') statusStr = chalk.magenta(statusStr);
       else statusStr = chalk.gray(statusStr);
 
       console.log(`${chalk.gray(indexStr)} ${titleStr}  ${chalk.cyan(ppsaStr)}  ${statusStr}`);
