@@ -99,6 +99,32 @@ async function extractRarArchive(rarFilePath, destFolder, password, { skipEbootF
 }
 
 /**
+ * Lists an archive with optional password and returns the internal path of param.json, or null.
+ */
+function findParamPathInArchive(bz, archivePath, pwd) {
+  const pwdFlag = pwd ? `-p:${pwd}` : '';
+  try {
+    const output = execSync(
+      `"${bz}" l ${pwdFlag} "${archivePath}"`.replace(/\s+/g, ' ').trim(),
+      { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'] }
+    );
+    // bz l rows: "YYYY-MM-DD HH:MM:SS Attr Size CompSize Name"
+    // Size/CompSize are plain integers; the Name (which may contain spaces or
+    // backslashes) is everything after the CompSize column.
+    const rowRe = /^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\s+\S+\s+\d+\s+\d+\s+(.+)$/;
+    for (const line of output.split(/\r?\n/)) {
+      const m = line.match(rowRe);
+      if (!m) continue;
+      const name = m[1].trim();
+      if (name && path.basename(name).toLowerCase() === 'param.json') {
+        return name;
+      }
+    }
+  } catch (e) {}
+  return null;
+}
+
+/**
  * Extracts param.json from an archive and parses game metadata.
  */
 async function getGameInfoFromArchive(rarFilePath, password) {
@@ -106,27 +132,53 @@ async function getGameInfoFromArchive(rarFilePath, password) {
   const tempDir = path.join(BIN_DIR, 'temp_param_' + Date.now());
   fs.mkdirSync(tempDir, { recursive: true });
 
-  let encryptedFlag = await isArchiveEncrypted(rarFilePath);
   const candidates = buildCandidates(password);
-  const testCandidates = encryptedFlag ? candidates : ['', ...candidates];
 
-  let success = false;
+  // Step 1: find param.json's exact internal path via listing
+  let paramInternalPath = findParamPathInArchive(bz, rarFilePath, '');
   let workingPassword = '';
+  let encryptedFlag = false;
 
-  for (const cand of testCandidates) {
-    try {
-      const pwd = cand ? `-p:${cand}` : '';
-      execSync(
-        `"${bz}" e -y ${pwd} -o:"${tempDir}" "${rarFilePath}" "*param.json"`.replace(/\s+/g, ' ').trim(),
-        { stdio: 'ignore' }
-      );
-      if (findParamJson(tempDir)) {
-        success = true;
+  if (!paramInternalPath) {
+    // Listing failed — archive may be encrypted; try each password candidate
+    encryptedFlag = true;
+    for (const cand of candidates) {
+      paramInternalPath = findParamPathInArchive(bz, rarFilePath, cand);
+      if (paramInternalPath) {
         workingPassword = cand;
-        encryptedFlag = !!cand;
         break;
       }
-    } catch (e) { /* try next */ }
+    }
+  }
+
+  // Step 2: build list of paths to try, from most specific to broadest
+  const pathsToTry = paramInternalPath
+    ? [paramInternalPath, 'sce_sys/param.json', 'sce_sys\\param.json', '*param.json']
+    : ['sce_sys/param.json', 'sce_sys\\param.json', '*param.json'];
+
+  const testCandidates = encryptedFlag ? (workingPassword ? [workingPassword] : candidates) : ['', ...candidates];
+
+  let success = false;
+
+  outer:
+  for (const cand of testCandidates) {
+    const pwd = cand ? `-p:${cand}` : '';
+    for (const target of pathsToTry) {
+      for (const cmd of ['e', 'x']) {
+        try {
+          execSync(
+            `"${bz}" ${cmd} -y ${pwd} -o:"${tempDir}" "${rarFilePath}" "${target}"`.replace(/\s+/g, ' ').trim(),
+            { stdio: 'ignore' }
+          );
+          if (findParamJson(tempDir)) {
+            workingPassword = cand;
+            encryptedFlag = !!cand;
+            success = true;
+            break outer;
+          }
+        } catch (e) { /* try next */ }
+      }
+    }
   }
 
   if (!success) {
@@ -251,14 +303,18 @@ function flattenFolderToEboot(destFolder) {
 
 async function compressFolderTo7z(folderPath, dest7zPath) {
   const bz = requireBz();
-  const cmd = `"${bz}" a -r -fmt:7z -l:5 -y "${dest7zPath}" "${folderPath}\\*"`;
+  const tmpPath = dest7zPath.replace(/\.7z$/i, '.compressing');
+  const cmd = `"${bz}" a -r -fmt:7z -l:5 -y "${tmpPath}" "${folderPath}\\*"`;
   execSync(cmd, { stdio: 'ignore' });
+  fs.renameSync(tmpPath, dest7zPath);
 }
 
 async function compressFileTo7z(filePath, dest7zPath) {
   const bz = requireBz();
-  const cmd = `"${bz}" a -fmt:7z -l:5 -y "${dest7zPath}" "${filePath}"`;
+  const tmpPath = dest7zPath.replace(/\.7z$/i, '.compressing');
+  const cmd = `"${bz}" a -fmt:7z -l:5 -y "${tmpPath}" "${filePath}"`;
   execSync(cmd, { stdio: 'ignore' });
+  fs.renameSync(tmpPath, dest7zPath);
 }
 
 module.exports = {
