@@ -126,7 +126,7 @@ C:\Code\PS5_Downloader\
 │   │   └── unrarService.js      ← UnRAR 설치, 암호 테스트, 추출, Bandizip 7z 재압축
 │   └── utils\
 │       ├── ppsaParser.js        ← PPSA 코드 추출
-│       ├── versionParser.js     ← 버전(vXX.XX) 추출
+│       ├── versionParser.js     ← 파일명 버전 추출 + param.json contentVersion 도출
 │       ├── titleNormalizer.js   ← 타이틀 정규화 (특수문자·로마숫자 변환)
 │       ├── postProcessor.js     ← 암호 확인·추출·평탄화·7z 재압축·리네임·DB 등록
 │       └── logger.js            ← chalk 컬러 출력
@@ -193,6 +193,7 @@ postProcessor: param.json 추출 → 암호 확인 → 추출+평탄화+Bandizip
 ### 3. 후처리 (`postProcessor.js`)
 
 - **메타데이터 취득**: `getGameInfoFromArchive` — `bz l` listing으로 param.json의 정확한 내부 경로를 찾은 뒤 해당 파일만 추출해 실제 타이틀·PPSA·버전 파싱. 파일이 수천 개인 대형 아카이브는 listing 출력이 execSync 기본 maxBuffer(1MB)를 초과하므로 listing 호출에 `maxBuffer 256MB` 부여 — 미설정 시 ENOBUFS로 listing이 조용히 실패하여 "암호화됨"으로 오진 → 비밀번호 추출 폴백 실패 → param.json이 있는데도 추출 실패로 보고됨
+- **버전 도출**: `versionParser.deriveVersionFromParam` — param.json의 `contentVersion`(`NN.NNN.NNN`)을 정본으로 사용. 후행 패치 세그먼트가 전부 0이면 드롭(`01.210.000` → `v01.210`), 0이 아니면 유지(`01.000.004` → `v01.000.004`). 폴백: `contentVersion` → `masterVersion` → `01.00`. RAR(`unrarService`)·exFAT(`osfmountService`)·UFS2(`ufs2Reader`) 세 리더가 공유 (이전엔 각각 `masterVersion`/존재하지 않는 `applicationVersion`을 참조해 실제 버전 대신 `v01.00`으로 폴백하는 버그가 있었음)
 - **암호화·분할 압축 세트**: UnRAR 추출 → eboot.bin 기준 평탄화 → `bz a -r -fmt:7z -l:7` 재압축
 - **단순 리네임**: 비암호·비분할 아카이브는 `{Title} [PPSA][ver]{ext}` 포맷으로 리네임 보존
 - **exFAT 파일**: Bandizip으로 `.7z`에 포함하여 압축 보존
@@ -245,6 +246,7 @@ bz.exe a -fmt:7z -l:7 -y "output.7z" "file.exfat"
 - [x] Phase 23: FDM 다운로드 매니저 연동 (`DOWNLOAD_MANAGER=FDM`)
 - [x] Phase 24: 백포트 필터링 — region 이름 기반 → 섹션 본문 `"Works on X.xx"` content-based 방식으로 전환
 - [x] Phase 25: 대형 아카이브 param.json 메타데이터 추출 안정화 — 출력 캡처하는 `bz l` 호출(`findParamPathInArchive`, `archiveContainsExfat`)에 maxBuffer 256MB 부여. 파일 수천 개 아카이브의 1MB 초과 listing이 ENOBUFS로 실패 → "암호화됨" 오진 → param.json 추출 실패로 보고되던 문제 수정
+- [x] Phase 26: 버전 도출을 param.json `contentVersion` 기준으로 통일 — 후행 `.000` 패치 세그먼트 드롭, `versionParser.deriveVersionFromParam`로 RAR·exFAT·UFS2 리더 공유. exFAT/UFS2가 존재하지 않는 `applicationVersion`을 참조해 항상 `v01.00`으로 폴백하던 버그 수정
 
 ---
 

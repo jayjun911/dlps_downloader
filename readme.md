@@ -215,7 +215,7 @@ For each section, the tool checks the content for `"Works on X.xx and higher"` n
 ### Post-processing Flow
 
 #### Standard regions (non-exFAT)
-1. **Metadata**: Lists the archive to locate `param.json`'s exact internal path, then extracts only that file to read real `titleName`, `PPSA`, `version`. Archives containing thousands of files (large listings) are handled correctly.
+1. **Metadata**: Lists the archive to locate `param.json`'s exact internal path, then extracts only that file to read real `titleName`, `PPSA`, `version`. Archives containing thousands of files (large listings) are handled correctly. The version is taken from `contentVersion` (`NN.NNN.NNN`); a trailing all-zero patch segment is dropped (`01.210.000` → `v01.210`, while `01.000.004` is kept as-is).
 2. **Password detection**: Tests with no password, then tries `DLPSGAME.COM`, `dlpsgame.com`, and any scraped password.
 3. **If encrypted or split**:
    - Extract with UnRAR/7z
@@ -466,7 +466,7 @@ ps5dl open "After The Fall"
 ### 후처리 흐름
 
 #### 일반 리전 (non-exFAT)
-1. **메타데이터**: 아카이브를 listing하여 `param.json`의 정확한 내부 경로를 찾은 뒤 해당 파일만 추출해 실제 타이틀·PPSA·버전 파싱. 파일이 수천 개인 대형 아카이브(listing 출력 대용량)도 정상 처리
+1. **메타데이터**: 아카이브를 listing하여 `param.json`의 정확한 내부 경로를 찾은 뒤 해당 파일만 추출해 실제 타이틀·PPSA·버전 파싱. 파일이 수천 개인 대형 아카이브(listing 출력 대용량)도 정상 처리. 버전은 `contentVersion`(`NN.NNN.NNN`)에서 도출하며 후행 `.000` 패치 세그먼트는 드롭(`01.210.000` → `v01.210`, `01.000.004`는 그대로 유지)
 2. **비밀번호 감지**: 비밀번호 없이 시도 → `DLPSGAME.COM` → `dlpsgame.com` → 스크랩 비밀번호 순차 대입
 3. **암호화·분할 압축인 경우**:
    - UnRAR/7z로 추출
