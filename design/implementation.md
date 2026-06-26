@@ -30,7 +30,9 @@
 | **비밀번호 후보 순서** | 웹 스크랩 패스워드 → `DLPSGAME.COM` → `dlpsgame.com` |
 | **스크래핑 기반 타입 분류** | 파일명 분석 배제, 본문 문단 원본 타입(`urlInfo.type`) 사용 |
 | **백포트 필터링** | 섹션 본문의 `"Works on X.xx and higher"` 노트 파싱 → `USER_FIRMWARE`(기본 7)와 비교 |
+| **섹션 선택** | 기본 exFAT 전용 — exFAT 섹션이 있으면 exFAT만 시도, non-exFAT 폴백 안 함. `--fallback`로 non-exFAT 폴백 허용 |
 | **exFAT 다운로드 실패** | 다음 섹션 시도 없이 `.exfat` → `.failed` 리네임 후 다음 게임으로 skip |
+| **백포트 파일명** | `[BACKPORT]` 대신 대상 펌웨어 표기 `[BACK4XX]`/`[BACK5XX]` — 백포트 링크 블록 라벨에서 파싱 |
 | **다운로드 매니저** | 내장 스트리머 (기본) 또는 FDM (`DOWNLOAD_MANAGER=FDM`) |
 
 ---
@@ -177,6 +179,8 @@ DOWNLOADER_SESSION=3
 ```
 섹션 정렬 (지역 우선순위)
     ↓
+exFAT 섹션 존재 시 exFAT만 남김 (--fallback 미지정 시 — non-exFAT 폴백 차단)
+    ↓
 각 섹션: 펌웨어 호환 체크 (content note 또는 region 이름 fallback)
     ↓ 호환
 링크 추출 → 호스트 선택
@@ -198,6 +202,7 @@ postProcessor: param.json 추출 → 암호 확인 → 추출+평탄화+Bandizip
 - **단순 리네임**: 비암호·비분할 아카이브는 `{Title} [PPSA][ver]{ext}` 포맷으로 리네임 보존
 - **exFAT 파일**: Bandizip으로 `.7z`에 포함하여 압축 보존
 - **타입별 분리**: GAME, DLC, UNLOCK, UPDATE, BACKPORT, INSTALL_GUIDE 각각 독립 처리
+- **백포트 파일명**: `buildTypeTag` — BACKPORT는 대상 펌웨어가 알려지면 `[BACK4XX]`/`[BACK5XX]`, 미상이면 `[BACKPORT]`. 펌웨어는 다운로드 시 `group.backportFw`로 전달됨
 
 ### 4. Bandizip 압축 (`unrarService.js`)
 
@@ -247,6 +252,8 @@ bz.exe a -fmt:7z -l:7 -y "output.7z" "file.exfat"
 - [x] Phase 24: 백포트 필터링 — region 이름 기반 → 섹션 본문 `"Works on X.xx"` content-based 방식으로 전환
 - [x] Phase 25: 대형 아카이브 param.json 메타데이터 추출 안정화 — 출력 캡처하는 `bz l` 호출(`findParamPathInArchive`, `archiveContainsExfat`)에 maxBuffer 256MB 부여. 파일 수천 개 아카이브의 1MB 초과 listing이 ENOBUFS로 실패 → "암호화됨" 오진 → param.json 추출 실패로 보고되던 문제 수정
 - [x] Phase 26: 버전 도출을 param.json `contentVersion` 기준으로 통일 — 후행 `.000` 패치 세그먼트 드롭, `versionParser.deriveVersionFromParam`로 RAR·exFAT·UFS2 리더 공유. exFAT/UFS2가 존재하지 않는 `applicationVersion`을 참조해 항상 `v01.00`으로 폴백하던 버그 수정
+- [x] Phase 27: 백포트 파일명에 대상 펌웨어 표기 — `[BACKPORT]` → `[BACK4XX]`/`[BACK5XX]`. 백포트 링크 블록 자체 라벨("Backport 4.xx")에서 `extractBackportVersion`으로 파싱(섹션 본편 요구 펌웨어와 혼동 안 함), `group.backportFw` → urlInfo → downloadedFiles → `postProcessor.buildTypeTag`로 전달
+- [x] Phase 28: 기본 동작을 exFAT 전용으로 전환 — exFAT 섹션이 있으면 non-exFAT 폴백 안 함(`--exfat` 제거, 기본화). 이전 non-exFAT 폴백은 `--fallback`로 옵트인
 
 ---
 
