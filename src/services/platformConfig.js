@@ -91,6 +91,14 @@ function listPlatformKeys() {
   return Object.keys(PLATFORMS);
 }
 
+/**
+ * Resolves a per-platform data file path under data/.
+ * e.g. platformDataPath('downloaded', 'xml') -> <root>/data/downloaded-ps5.xml
+ */
+function platformDataPath(baseName, ext) {
+  return path.join(__dirname, '../../data', `${baseName}-${getCurrentPlatformKey()}.${ext}`);
+}
+
 module.exports = {
   PLATFORMS,
   DEFAULT_PLATFORM,
@@ -100,4 +108,5 @@ module.exports = {
   setCurrentPlatform,
   listPlatforms,
   listPlatformKeys,
+  platformDataPath,
 };

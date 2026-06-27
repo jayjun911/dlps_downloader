@@ -1,7 +1,9 @@
 const fs = require('fs');
 const path = require('path');
+const { platformDataPath } = require('./platformConfig');
 
-const PROGRESS_PATH = path.join(__dirname, '../../data/progress.json');
+// Per-platform in-progress set, e.g. data/progress-ps5.json
+const PROGRESS_PATH = platformDataPath('progress', 'json');
 
 function loadProgressSet() {
   try {

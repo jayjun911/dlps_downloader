@@ -1,12 +1,14 @@
 const { findGameInWebList } = require('../services/webScraper');
 const { addDownloadedGame, loadDownloadedGames } = require('../services/downloadedDb');
+const { platformDataPath } = require('../services/platformConfig');
 const logger = require('../utils/logger');
 const readline = require('readline');
 const chalk = require('chalk');
 const path = require('path');
 const fs = require('fs');
 
-const DB_PATH = path.join(__dirname, '../../data/downloaded.xml');
+// Per-platform downloaded library, e.g. data/downloaded-ps5.xml
+const DB_PATH = platformDataPath('downloaded', 'xml');
 
 /**
  * Removes a game entry from downloaded.xml by title.

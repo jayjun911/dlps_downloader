@@ -7,6 +7,7 @@ const { downloadFromDatanodes } = require('../services/datanodesDownloader');
 const { extractVersion } = require('../utils/versionParser');
 const { processDownloadedFiles, getUniqueFilePath } = require('../utils/postProcessor');
 const { loadProgressSet, markProgress, clearProgress } = require('../services/progressDb');
+const { platformDataPath } = require('../services/platformConfig');
 const logger = require('../utils/logger');
 const open = require('open');
 const readline = require('readline');
@@ -15,7 +16,8 @@ const path = require('path');
 const ora = require('ora');
 const chalk = require('chalk');
 
-const FAIL_LOG_PATH = path.join(__dirname, '../../data/failed_downloads.json');
+// Per-platform failure log, e.g. data/failed_downloads-ps5.json
+const FAIL_LOG_PATH = platformDataPath('failed_downloads', 'json');
 
 /**
  * Logs a download failure to failed_downloads.json.

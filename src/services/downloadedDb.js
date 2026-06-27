@@ -2,8 +2,10 @@ const fs = require('fs');
 const path = require('path');
 const { XMLParser } = require('fast-xml-parser');
 const { normalizeTitle } = require('../utils/titleNormalizer');
+const { platformDataPath } = require('./platformConfig');
 
-const DB_PATH = path.join(__dirname, '../../data/downloaded.xml');
+// Per-platform downloaded library, e.g. data/downloaded-ps5.xml
+const DB_PATH = platformDataPath('downloaded', 'xml');
 
 /**
  * Loads the list of successfully downloaded games from downloaded.xml.

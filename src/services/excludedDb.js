@@ -1,8 +1,10 @@
 const fs = require('fs');
 const path = require('path');
 const { normalizeTitle } = require('../utils/titleNormalizer');
+const { platformDataPath } = require('./platformConfig');
 
-const EXCLUDED_FILE = path.join(__dirname, '../../data/excluded.json');
+// Per-platform exclusion list, e.g. data/excluded-ps5.json
+const EXCLUDED_FILE = platformDataPath('excluded', 'json');
 
 function ensureDirectoryExistence(filePath) {
   const dirname = path.dirname(filePath);
