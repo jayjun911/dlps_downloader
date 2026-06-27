@@ -138,6 +138,66 @@ function extractMeta(json) {
   };
 }
 
+// Finds the matching '}' for the '{' at openIdx, respecting JSON strings/escapes.
+function matchBraceEnd(buf, openIdx) {
+  let depth = 0, inStr = false, esc = false;
+  for (let i = openIdx; i < buf.length; i++) {
+    const c = buf[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === 0x5c) esc = true;        // backslash
+      else if (c === 0x22) inStr = false;     // closing quote
+    } else if (c === 0x22) inStr = true;
+    else if (c === 0x7b) depth++;             // {
+    else if (c === 0x7d) { depth--; if (depth === 0) return i; } // }
+  }
+  return -1;
+}
+
+// Given an offset inside a JSON object, scan backward for the enclosing '{' and
+// return the parsed object (must contain titleId/localizedParameters).
+function extractEnclosingJson(fd, needleOffset, fileSize) {
+  const BACK = 256 * 1024, FWD = 512 * 1024;
+  const start = Math.max(0, needleOffset - BACK);
+  const win = readBytes(fd, start, Math.min(BACK + FWD, fileSize - start));
+  const rel = needleOffset - start;
+  for (let i = rel; i >= 0; i--) {
+    if (win[i] !== 0x7b) continue;            // look for an opening '{'
+    const end = matchBraceEnd(win, i);
+    if (end > rel) {
+      try {
+        const obj = JSON.parse(win.toString('utf-8', i, end + 1));
+        if (obj && (obj.titleId || obj.localizedParameters)) return obj;
+      } catch (e) { /* wrong brace — keep scanning outward */ }
+    }
+  }
+  return null;
+}
+
+// Fallback for images whose inode tables we can't traverse (e.g. PFS-layout
+// .ffpkg): PS5 param.json is stored as plain-text JSON, so scan the raw image
+// for it and parse the enclosing object. ~seconds for a multi-GB file.
+function scanForParamJson(fd, fileSize) {
+  const NEEDLE = Buffer.from('"localizedParameters"');
+  const CH = 8 * 1024 * 1024;
+  const buf = Buffer.alloc(CH);
+  let carry = Buffer.alloc(0), pos = 0;
+  while (pos < fileSize) {
+    const n = fs.readSync(fd, buf, 0, Math.min(CH, fileSize - pos), pos);
+    if (n <= 0) break;
+    const chunk = carry.length ? Buffer.concat([carry, buf.subarray(0, n)]) : buf.subarray(0, n);
+    let idx = chunk.indexOf(NEEDLE);
+    while (idx >= 0) {
+      const obj = extractEnclosingJson(fd, pos - carry.length + idx, fileSize);
+      if (obj) return obj;
+      idx = chunk.indexOf(NEEDLE, idx + 1);
+    }
+    carry = Buffer.from(chunk.subarray(Math.max(0, chunk.length - NEEDLE.length)));
+    pos += n;
+  }
+  return null;
+}
+
 /**
  * Validate a .ffpkg (UFS2 image) and extract game metadata from sce_sys/param.json.
  * Returns { valid, fsValid, metadata, message }.
@@ -171,22 +231,38 @@ function readFfpkgParam(filePath) {
     const actualSize = fs.fstatSync(fd).size;
     const declaredSize = s.fs_size * s.fs_fsize;
     fsValid = declaredSize > 0 && actualSize >= declaredSize;
-    // A param.json failure on an incomplete image is reported as truncation;
-    // on a complete image it's an unreadable/unsupported layout.
-    const fail = (msg) => ({ valid: false, fsValid, metadata: null,
-      message: fsValid ? msg : `incomplete image: declares ${declaredSize} bytes but file is ${actualSize} bytes (${msg})` });
 
-    const sceIno = lookup(fd, s, ROOTINO, 'sce_sys');
-    if (!sceIno) return fail('sce_sys directory not found (unsupported FS layout, e.g. PFS)');
-    const paramIno = lookup(fd, s, sceIno, 'param.json');
-    if (!paramIno) return fail('sce_sys/param.json not found');
+    // Primary path: locate param.json via UFS2 inode traversal (fast).
+    let json = null;
+    try {
+      const sceIno = lookup(fd, s, ROOTINO, 'sce_sys');
+      const paramIno = sceIno ? lookup(fd, s, sceIno, 'param.json') : null;
+      if (paramIno) {
+        const pInode = readInode(fd, s, paramIno);
+        if ((pInode.mode & IFMT) === IFREG && pInode.size > 0 && pInode.size <= 8 * 1024 * 1024) {
+          json = JSON.parse(readFileData(fd, s, pInode).toString('utf-8'));
+        }
+      }
+    } catch (e) { /* fall back to content scan */ }
 
-    const pInode = readInode(fd, s, paramIno);
-    if ((pInode.mode & IFMT) !== IFREG) return fail('param.json is not a regular file');
-    if (pInode.size <= 0 || pInode.size > 8 * 1024 * 1024) return fail(`param.json size implausible (${pInode.size})`);
+    // Fallback path: scan the raw image for the plain-text param.json. Only for
+    // complete images (a truncated download shouldn't be packaged from a stray
+    // blob), and only when traversal didn't already succeed.
+    let viaScan = false;
+    if (!json && fsValid) {
+      json = scanForParamJson(fd, actualSize);
+      viaScan = !!json;
+    }
 
-    const json = JSON.parse(readFileData(fd, s, pInode).toString('utf-8'));
-    return { valid: true, fsValid, metadata: extractMeta(json), message: 'UFS2 valid; param.json parsed' };
+    if (json) {
+      return { valid: true, fsValid, metadata: extractMeta(json),
+        message: viaScan ? 'param.json located via content scan (non-UFS2 layout)' : 'UFS2 valid; param.json parsed' };
+    }
+
+    return { valid: false, fsValid, metadata: null,
+      message: fsValid
+        ? 'param.json not found (unsupported FS layout, e.g. PFS)'
+        : `incomplete image: declares ${declaredSize} bytes but file is ${actualSize} bytes` };
   } catch (e) {
     return { valid: false, fsValid, metadata: null, message: `UFS2 parse error: ${e.message}` };
   } finally {

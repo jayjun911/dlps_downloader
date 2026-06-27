@@ -307,11 +307,11 @@ async function processFfpkg({ filename, type, downloadDir, initialTitle, initial
       : '(no param.json)';
     spinner.succeed(`[${type}] Validated — ${metaStr}`);
   } else if (result.fsValid) {
-    // Complete, structurally-sound image we just can't traverse (e.g. PFS layout).
-    // Package it anyway using fallback metadata instead of aborting. Use a plain
-    // log line (not spinner.warn) so the long message isn't re-rendered.
+    // Complete, structurally-sound PS5 image but param.json couldn't be read even
+    // by content scan. Package it anyway with filename-based metadata instead of
+    // aborting. Plain log line (not spinner.warn) to avoid spinner re-rendering.
     spinner.stop();
-    logger.warn(`[${type}] .ffpkg image is intact but param.json is unreadable (unsupported layout, e.g. PFS) — using filename-based metadata`);
+    logger.warn(`[${type}] Valid PS5 game image, but couldn't read param.json (non-standard .ffpkg layout) — naming from filename`);
   } else {
     // Truncated / corrupt / not a filesystem — don't waste time packaging garbage.
     spinner.fail(`[${type}] .ffpkg validation failed: ${result.message}`);
