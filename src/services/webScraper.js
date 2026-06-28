@@ -442,8 +442,26 @@ To bypass this block, please follow these steps:
   return sections;
 }
 
+/**
+ * Returns true if a fresh, non-empty subpage cache exists for the slug — i.e.
+ * getGameSubpageData would serve it without hitting the network. Lets callers
+ * skip request throttling on cache hits.
+ */
+function isSubpageCached(slug) {
+  const cachePath = path.join(SUBPAGE_CACHE_DIR, `${slug}.json`);
+  if (!fs.existsSync(cachePath)) return false;
+  try {
+    if (Date.now() - fs.statSync(cachePath).mtimeMs >= CACHE_TTL_MS) return false;
+    const parsed = JSON.parse(fs.readFileSync(cachePath, 'utf-8'));
+    return Array.isArray(parsed) && parsed.length > 0;
+  } catch (e) {
+    return false;
+  }
+}
+
 module.exports = {
   getWebGameList,
   findGameInWebList,
-  getGameSubpageData
+  getGameSubpageData,
+  isSubpageCached
 };

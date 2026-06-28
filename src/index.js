@@ -88,6 +88,7 @@ program
   .command('scan')
   .argument('[name]', 'Game name to scan (partial match). Omit to scan the entire PS4 list.')
   .option('-l, --limit <number>', 'Scan only the top N games from the TBD list')
+  .option('-d, --delay <ms>', 'Throttle: delay before each network fetch in ms (default 1500, jittered; 0 to disable)')
   .option('-r, --refresh', 'Force re-scrape subpages instead of using cached data')
   .description('Visit PS4-list subpages and label PS1/PS2 emulation packages, no download (PS4 only)')
   .action((name, options) => {

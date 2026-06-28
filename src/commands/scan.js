@@ -1,6 +1,6 @@
 const ora = require('ora');
 const chalk = require('chalk');
-const { getWebGameList, findGameInWebList, getGameSubpageData } = require('../services/webScraper');
+const { getWebGameList, findGameInWebList, getGameSubpageData, isSubpageCached } = require('../services/webScraper');
 const { getCurrentPlatformKey } = require('../services/platformConfig');
 const { classifyId, consoleLabel } = require('../utils/consoleClassifier');
 const { setLabel, removeLabel, getLabel, loadLabelMap } = require('../services/labelDb');
@@ -70,6 +70,14 @@ async function scanCommand(query, options = {}) {
     return;
   }
 
+  // Safety-first throttle: pause ~baseDelay (with jitter) before each network
+  // fetch so bursts don't trip Cloudflare/rate-limiting. Cache hits are instant.
+  const baseDelay = options.delay !== undefined ? parseInt(options.delay, 10) : 1500;
+  if (options.delay !== undefined && (isNaN(baseDelay) || baseDelay < 0)) {
+    logger.error('Invalid delay value. Please specify milliseconds (>= 0).');
+    return;
+  }
+
   let games;
   try {
     if (limit !== null) {
@@ -94,15 +102,28 @@ async function scanCommand(query, options = {}) {
     return;
   }
 
-  logger.info(`Scanning ${games.length} game(s) for non-PS4 (PS1/PS2) titles...`);
+  const delayLabel = baseDelay > 0 ? `~${(baseDelay / 1000).toFixed(1)}s throttle` : 'no throttle';
+  logger.info(`Scanning ${games.length} game(s) for non-PS4 (PS1/PS2) titles... [${delayLabel}]`);
+
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  // Jittered delay in [0.75x, 1.5x] of base to avoid a fixed-interval pattern.
+  const jitter = (base) => Math.round(base * (0.75 + Math.random() * 0.75));
 
   let labeled = 0;
   let ps4Count = 0;
   let noId = 0;
   let failed = 0;
+  let aborted = false;
 
   for (let i = 0; i < games.length; i++) {
     const g = games[i];
+
+    // Throttle only before requests that will actually hit the network.
+    const willHitNetwork = !!options.refresh || !isSubpageCached(g.slug);
+    if (i > 0 && willHitNetwork && baseDelay > 0) {
+      await sleep(jitter(baseDelay));
+    }
+
     const spinner = ora(`[${i + 1}/${games.length}] ${g.title}`).start();
     try {
       const sections = await getGameSubpageData(g.slug, g.url, !!options.refresh);
@@ -133,11 +154,19 @@ async function scanCommand(query, options = {}) {
     } catch (err) {
       failed++;
       spinner.fail(`${g.title}: ${err.message}`);
+      // Rate-limit / Cloudflare challenge → stop now to avoid escalating to a ban.
+      if (/cloudflare|turnstile|challenge|\b429\b|too many requests/i.test(err.message)) {
+        logger.warn('Rate-limit/Cloudflare challenge detected — stopping scan to avoid a ban.');
+        logger.info('Wait a while, then re-run the same command to resume (labeled/cached games are skipped).');
+        aborted = true;
+        break;
+      }
     }
   }
 
+  const verb = aborted ? 'Scan stopped' : 'Scan complete';
   logger.success(
-    `Scan complete — ${chalk.cyan(labeled)} labeled (PS1/PS2), ` +
+    `${verb} — ${chalk.cyan(labeled)} labeled (PS1/PS2), ` +
     `${ps4Count} PS4, ${noId} no-ID, ${failed} failed.`
   );
 }
