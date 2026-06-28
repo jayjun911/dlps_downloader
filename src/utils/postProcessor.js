@@ -587,8 +587,11 @@ async function processDownloadedFiles({
     for (const file of extraFiles) {
       const ext    = path.extname(file).toLowerCase();
       const isText = ['.txt', '.pdf', '.jpg', '.jpeg', '.png', '.md', '.htm', '.html'].includes(ext);
+      // PS4 .pkg is already a compressed package — recompressing to 7z wastes
+      // time for negligible gain, so skip compression and just rename + register.
+      const isPkg  = ext === '.pkg';
 
-      if (isGame && !isText) {
+      if (isGame && !isText && !isPkg) {
         const dest7zPath     = path.join(downloadDir, `${baseName}.7z`);
         const compressSpinner = ora(`[${type}] Renaming and compressing "${file}" to 7z...`).start();
         const currentPath    = path.join(downloadDir, file);
