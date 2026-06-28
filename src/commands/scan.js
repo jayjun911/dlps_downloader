@@ -3,8 +3,51 @@ const chalk = require('chalk');
 const { getWebGameList, findGameInWebList, getGameSubpageData } = require('../services/webScraper');
 const { getCurrentPlatformKey } = require('../services/platformConfig');
 const { classifyId, consoleLabel } = require('../utils/consoleClassifier');
-const { setLabel, removeLabel, getLabel } = require('../services/labelDb');
+const { setLabel, removeLabel, getLabel, loadLabelMap } = require('../services/labelDb');
+const { loadLocalLibrary } = require('../services/localLibrary');
+const { loadDownloadedGames } = require('../services/downloadedDb');
+const { loadProgressSet } = require('../services/progressDb');
 const logger = require('../utils/logger');
+
+/**
+ * Builds the TBD (To Be Downloaded) list, optionally filtered by a query.
+ * Mirrors the TBD logic in the download command; already-labeled entries are
+ * excluded since they aren't PS4 downloads.
+ */
+async function buildTbdList(query) {
+  let localGames = [];
+  try {
+    localGames = loadLocalLibrary();
+  } catch (e) {
+    // No local library for this platform yet — treat everything as not-local.
+  }
+  const downloadedGames = loadDownloadedGames();
+  const webList = await getWebGameList();
+
+  const { getWebGameStatus } = require('../utils/gameMatcher');
+  const localMap = new Map(localGames.map(g => [g.normalizedTitle, g]));
+  const dlMap = new Map(downloadedGames.map(g => [g.normalizedTitle, g]));
+
+  const localPpsaMap = new Map();
+  for (const g of localGames) if (g.ppsa) localPpsaMap.set(g.ppsa.toUpperCase(), g);
+  const dlPpsaMap = new Map();
+  for (const g of downloadedGames) if (g.ppsa) dlPpsaMap.set(g.ppsa.toUpperCase(), g);
+
+  const { loadExcludedGames } = require('../services/excludedDb');
+  const excludedSet = new Set(loadExcludedGames().map(g => g.normalizedTitle));
+  const progressSet = loadProgressSet();
+  const labelMap = loadLabelMap();
+
+  const q = query ? query.toLowerCase() : null;
+  const tbd = [];
+  for (const g of webList) {
+    if (labelMap.has(g.normalizedTitle)) continue;            // already labeled
+    if (q && !g.title.toLowerCase().includes(q)) continue;
+    const info = getWebGameStatus(g, localMap, dlMap, excludedSet, localPpsaMap, dlPpsaMap, progressSet);
+    if (info.status === 'tbd') tbd.push(g);
+  }
+  return tbd;
+}
 
 /**
  * Handles the 'scan' CLI command (PS4 only).
@@ -21,9 +64,23 @@ async function scanCommand(query, options = {}) {
     return;
   }
 
+  const limit = options.limit !== undefined ? parseInt(options.limit, 10) : null;
+  if (limit !== null && (isNaN(limit) || limit <= 0)) {
+    logger.error('Invalid limit value. Please specify a positive integer.');
+    return;
+  }
+
   let games;
   try {
-    if (query) {
+    if (limit !== null) {
+      // Top N of the TBD list (optionally filtered by name).
+      const tbd = await buildTbdList(query);
+      if (tbd.length === 0) {
+        logger.info('No TBD (To Be Downloaded) games to scan.');
+        return;
+      }
+      games = tbd.slice(0, limit);
+    } else if (query) {
       games = await findGameInWebList(query);
       if (games.length === 0) {
         logger.warn(`No games found matching: "${query}"`);
