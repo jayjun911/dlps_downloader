@@ -150,7 +150,14 @@ async function scanCommand(query, options = {}) {
         .filter(Boolean);
       const hasPs4 = detected.some(d => d.console === 'ps4');
 
-      if (!hasPs4 && detected.length > 0) {
+      const isJpnOnly = sections.length > 0 && sections.every(s =>
+        /JPN|JAPAN/i.test(s.region)
+      );
+      if (isJpnOnly) {
+        setLabel(g.title, 'jpn', null);
+        labeled++;
+        spinner.succeed(`${g.title} → ${chalk.cyan('[JPN]')} (Japan-only sections)`);
+      } else if (!hasPs4 && detected.length > 0) {
         const other = detected[0];
         setLabel(g.title, other.console, other.id);
         labeled++;

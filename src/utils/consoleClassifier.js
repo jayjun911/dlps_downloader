@@ -33,6 +33,7 @@ const CONSOLE_LABEL = {
   'ps1-2': 'PS1/2',
   saturn: 'SATURN',
   psp: 'PSP',
+  jpn: 'JPN',
 };
 
 // Emulation packages repackaged for PS4 use arbitrary per-game vanity content
@@ -41,6 +42,7 @@ const CONSOLE_LABEL = {
 // the subpage payload. Add a row here to support a new emulated system.
 const EMU_TAGS = [
   { console: 'ps1',    regex: /\[\s*PSX\s*to\s*PS4\s*\]|PSX\s*to\s*PS4|PSX\s*emu/i },
+  { console: 'ps2',    regex: /\[\s*PS2\s*to\s*PS4\s*\]|PS2\s*to\s*PS4|PS2\s*emu/i },
   { console: 'saturn', regex: /\[\s*SATURN\s*to\s*PS4\s*\]|SATURN\s*to\s*PS4|SATURN\s*emu/i },
   { console: 'psp',    regex: /\[\s*PSP\s*to\s*PS4\s*\]|PSP\s*to\s*PS4|PSP\s*emu/i },
 ];

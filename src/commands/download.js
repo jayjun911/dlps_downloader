@@ -113,6 +113,16 @@ async function downloadSingleGame(game, options = {}) {
       return;
     }
 
+    const isJpnOnly = sections.length > 0 && sections.every(s =>
+      /JPN|JAPAN/i.test(s.region)
+    );
+    if (isJpnOnly) {
+      setLabel(game.title, 'jpn', null);
+      spinner.stop();
+      logger.warn(`"${game.title}" has only Japanese sections. Marked as [JPN] and skipping.`);
+      return;
+    }
+
     // Check if local library has PPSA
     const localGames = loadLocalLibrary();
     const localMatch = localGames.find(lg => lg.normalizedTitle === game.normalizedTitle);
