@@ -219,8 +219,46 @@ function decodeAndExtractLinks(base64Payload) {
           if (type === 'BACKPORT' && firmwareRequirement === null && shouldDropBackport('', trimmedUrl, '')) {
             continue;
           }
-          groups.push({ type, links: [{ label: 'Link', url: sanitizeFichierUrl(trimmedUrl) }] });
+          groups.push({ type, links: [{ label: 'Link', url: sanitizeFichierUrl(trimmedUrl) }], rawText: trimmedUrl });
         }
+      }
+
+      // Filter UPDATE groups to only keep the highest version
+      const updateGroups = groups.filter(g => g.type === 'UPDATE');
+      if (updateGroups.length > 1) {
+        let bestGroup = null;
+        let bestUpdateVer = -1;
+        let bestFwVer = -1;
+
+        for (const g of updateGroups) {
+          let updateVer = 0;
+          let fwVer = 0;
+          const text = g.rawText || g.links.map(l => l.url).join(' ');
+          
+          const verMatch = text.match(/(?:update|patch|version|v)[\s-]*(\d+\.\d+)/i);
+          if (verMatch) updateVer = parseFloat(verMatch[1]);
+          
+          const fwMatches = text.match(/\b(\d+\.\d+)\b/g);
+          if (fwMatches) {
+            for (const match of fwMatches) {
+              const val = parseFloat(match);
+              if (val !== updateVer && val > fwVer) {
+                fwVer = val;
+              }
+            }
+          }
+          
+          if (updateVer > bestUpdateVer || (updateVer === bestUpdateVer && fwVer > bestFwVer)) {
+            bestUpdateVer = updateVer;
+            bestFwVer = fwVer;
+            bestGroup = g;
+          }
+        }
+
+        const otherGroups = groups.filter(g => g.type !== 'UPDATE');
+        if (bestGroup) otherGroups.push(bestGroup);
+        groups.length = 0;
+        groups.push(...otherGroups);
       }
 
       return { groups, password, firmwareRequirement };
@@ -276,7 +314,7 @@ function decodeAndExtractLinks(base64Payload) {
       if (type === 'BACKPORT' && firmwareRequirement === null && shouldDropBackport(blockFullText)) {
         return;
       }
-      const group = { type, links: blockLinks };
+      const group = { type, links: blockLinks, rawText: blockFullText };
       // Tag backport groups with their own target firmware (parsed from this block,
       // not the section) so post-processing can name the file [BACK4XX] etc.
       if (type === 'BACKPORT' || type === 'BACK') {
@@ -314,8 +352,46 @@ function decodeAndExtractLinks(base64Payload) {
     });
 
     if (flatLinks.length > 0) {
-      groups.push({ type: detectTypeFromText(''), links: flatLinks });
+      groups.push({ type: detectTypeFromText(''), links: flatLinks, rawText: '' });
     }
+  }
+
+  // Filter UPDATE groups to only keep the highest version
+  const updateGroups = groups.filter(g => g.type === 'UPDATE');
+  if (updateGroups.length > 1) {
+    let bestGroup = null;
+    let bestUpdateVer = -1;
+    let bestFwVer = -1;
+
+    for (const g of updateGroups) {
+      let updateVer = 0;
+      let fwVer = 0;
+      const text = g.rawText || g.links.map(l => l.url).join(' ');
+      
+      const verMatch = text.match(/(?:update|patch|version|v)[\s-]*(\d+\.\d+)/i);
+      if (verMatch) updateVer = parseFloat(verMatch[1]);
+      
+      const fwMatches = text.match(/\b(\d+\.\d+)\b/g);
+      if (fwMatches) {
+        for (const match of fwMatches) {
+          const val = parseFloat(match);
+          if (val !== updateVer && val > fwVer) {
+            fwVer = val;
+          }
+        }
+      }
+      
+      if (updateVer > bestUpdateVer || (updateVer === bestUpdateVer && fwVer > bestFwVer)) {
+        bestUpdateVer = updateVer;
+        bestFwVer = fwVer;
+        bestGroup = g;
+      }
+    }
+
+    const otherGroups = groups.filter(g => g.type !== 'UPDATE');
+    if (bestGroup) otherGroups.push(bestGroup);
+    groups.length = 0;
+    groups.push(...otherGroups);
   }
 
   return { groups, password, firmwareRequirement };

@@ -5,7 +5,8 @@ const { getBestDownloadLinks, getRegionPriority } = require('../services/linkExt
 const { download1fichier } = require('../services/fichierDownloader');
 const { downloadFromDatanodes } = require('../services/datanodesDownloader');
 const { extractVersion } = require('../utils/versionParser');
-const { processDownloadedFiles, getUniqueFilePath } = require('../utils/postProcessor');
+const { getPlatformHandler } = require('../platforms');
+const { getUniqueFilePath } = require('../utils/postProcessor');
 const { loadProgressSet, markProgress, clearProgress } = require('../services/progressDb');
 const { platformDataPath, getCurrentPlatformKey } = require('../services/platformConfig');
 const { setLabel } = require('../services/labelDb');
@@ -178,6 +179,8 @@ async function downloadSingleGame(game, options = {}) {
       let downloadedFiles = [];
       let downloadCompleted = false;
 
+      const sectionConsole = section.console || (classifyId(section.ppsa) || {}).console || activeConsole;
+      const platform = getPlatformHandler(sectionConsole);
       const regionInfo = `region [${section.region}], PPSA [${section.ppsa}]`;
 
       // Inner loop: retry same section with next-best host when a link is dead
@@ -312,7 +315,7 @@ async function downloadSingleGame(game, options = {}) {
   
           // ── Step 3: Password removal, extraction, rename, register ──
           if (downloadedFiles.length > 0) {
-            await processDownloadedFiles({
+            const finalRegisteredFiles = await platform.postProcess({
               downloadedFiles,
               downloadDir,
               password: options.password || bestLinks.password,
@@ -321,6 +324,22 @@ async function downloadSingleGame(game, options = {}) {
               initialTitle: game.title,
               initialPpsa: bestLinks.ppsa || targetPPSA || 'Unknown'
             });
+
+            if (finalRegisteredFiles && finalRegisteredFiles.length > 0) {
+              const { addDownloadedGame } = require('../services/downloadedDb');
+              for (const reg of finalRegisteredFiles) {
+                addDownloadedGame({
+                  fileName: reg.fileName,
+                  title: game.title,
+                  ppsa: bestLinks.ppsa || targetPPSA || 'Unknown',
+                  version: 'v01.00',
+                  region: bestLinks.region,
+                  host: bestLinks.hostName,
+                  type: reg.type,
+                  backportFw: reg.backportFw
+                });
+              }
+            }
           }
           success = true;
           sectionDone = true;
@@ -335,77 +354,30 @@ async function downloadSingleGame(game, options = {}) {
         }
       } catch (err) {
         lastError = err;
-        const isExfatSection = section.region.toUpperCase().includes('EXFAT');
         const downloadDir = options.out || process.env.DOWNLOAD_DIR || path.join(__dirname, '../../downloads');
         const downloadStarted = downloadedFiles && downloadedFiles.length > 0;
 
-        // Clean up partial files (or rename .exfat to .failed for exFAT sections)
         if (!downloadCompleted && downloadStarted) {
-          for (const fileItem of downloadedFiles) {
-            const filePath = path.join(downloadDir, fileItem.filename);
-            try {
-              if (isExfatSection && fileItem.filename.toLowerCase().endsWith('.exfat')) {
-                const failedPath = filePath.replace(/\.exfat$/i, '.failed');
-                if (fs.existsSync(filePath)) {
-                  fs.renameSync(filePath, failedPath);
-                  logger.warn(`Renamed failed exFAT: ${path.basename(failedPath)}`);
-                }
-              } else {
-                fs.unlinkSync(filePath);
-              }
-            } catch (e) {
-              // ignore cleanup error
-            }
-          }
+          platform.cleanupPartialFiles(downloadedFiles, downloadDir, section.region);
         }
 
         if (downloadCompleted) {
-          // Post-download processing failed — don't retry
           logger.error(`\nAttempt failed after download completion: ${err.message}. Aborting further region attempts.`);
           sectionDone = true;
           break;
-        } else if (err.isLinkDead && currentHostName) {
-          if (isExfatSection && downloadStarted) {
-            // Partial exFAT data was written before link died — rename and abort
-            try {
-              for (const f of fs.readdirSync(downloadDir)) {
-                if (f.toLowerCase().endsWith('.exfat')) {
-                  const fp = path.join(downloadDir, f);
-                  const failedFp = fp.replace(/\.exfat$/i, '.failed');
-                  fs.renameSync(fp, failedFp);
-                  logger.warn(`Renamed failed exFAT: ${path.basename(failedFp)}`);
-                }
-              }
-            } catch (e) {}
-            sectionDone = true;
-            const exfatErr = new Error(`exFAT download failed (${regionInfo}): ${err.message}`);
-            exfatErr.isHandled = true;
-            throw exfatErr;
-          }
-          // No partial data — skip this host and retry section with next available host
+        }
+
+        try {
+          platform.handleDownloadError(err, downloadedFiles, downloadDir, section.region, downloadStarted);
+        } catch (platformErr) {
+          sectionDone = true;
+          throw platformErr;
+        }
+
+        if (err.isLinkDead && currentHostName) {
           skipHosts.push(currentHostName);
           logger.warn(`\n[${regionInfo}] ${currentHostName} link is dead. Trying next available host...`);
           downloadedFiles = [];
-        } else if (isExfatSection && downloadStarted) {
-          // exFAT download started but failed (non-link-dead error) — cleanup and abort
-          try {
-            for (const f of fs.readdirSync(downloadDir)) {
-              if (f.toLowerCase().endsWith('.exfat')) {
-                const fp = path.join(downloadDir, f);
-                const failedFp = fp.replace(/\.exfat$/i, '.failed');
-                fs.renameSync(fp, failedFp);
-                logger.warn(`Renamed failed exFAT: ${path.basename(failedFp)}`);
-              }
-            }
-          } catch (e) {}
-          sectionDone = true;
-          const exfatErr = new Error(`exFAT download failed (${regionInfo}): ${err.message}`);
-          exfatErr.isHandled = true;
-          throw exfatErr;
-        } else if (isExfatSection && !downloadStarted) {
-          // No links at all for this exFAT section — skip to next section
-          logger.warn(`No downloadable links for exFAT section [${section.region}] — trying next section`);
-          sectionDone = true;
         } else {
           logger.warn(`\nAttempt failed for ${regionInfo}: ${err.message}. Trying next available option...`);
           sectionDone = true;
