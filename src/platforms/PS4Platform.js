@@ -127,6 +127,11 @@ class PS4Platform extends BasePlatform {
     };
 
     for (const type of Object.keys(fileGroups)) {
+      if (type === 'BACKPORT') {
+        logger.info(`[PS4] Skipping BACKPORT files (not applicable for PS4)`);
+        continue;
+      }
+
       if (type === 'INSTALL_GUIDE') {
         for (const file of fileGroups[type]) {
           registeredFiles.push({ fileName: file, type });
