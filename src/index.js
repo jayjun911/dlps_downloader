@@ -35,6 +35,7 @@ program
   .option('-o, --out <path>', 'Override the default download directory')
   .option('-f, --fallback', 'Allow non-exFAT sections as a fallback when an exFAT section exists (default: exFAT-exclusive)')
   .option('-i, --interactive', 'Open game page in browser when a download fails (for manual inspection)')
+  .option('--force', 'Ignore JPN/platform labels and download regardless')
   .description('Download a game by title, a batch from the TBD list, or a direct file URL')
   .action((title, options) => {
     downloadCommand(title, options);

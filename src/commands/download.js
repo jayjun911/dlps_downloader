@@ -101,26 +101,28 @@ async function downloadSingleGame(game, options = {}) {
       })
       .filter(Boolean);
     const hasActive = detected.some(d => d.console === activeConsole);
-    if (!hasActive && detected.length > 0) {
-      const other = detected[0];
-      setLabel(game.title, other.console, other.id);
-      spinner.stop();
-      logger.warn(
-        `"${game.title}" is a ${consoleLabel(other.console)} title` +
-        `${other.id ? ` (${other.id})` : ''}, not ${activeConsole.toUpperCase()}. ` +
-        `Marked as [${consoleLabel(other.console)}] and skipping.`
-      );
-      return;
-    }
+    if (!options.force) {
+      if (!hasActive && detected.length > 0) {
+        const other = detected[0];
+        setLabel(game.title, other.console, other.id);
+        spinner.stop();
+        logger.warn(
+          `"${game.title}" is a ${consoleLabel(other.console)} title` +
+          `${other.id ? ` (${other.id})` : ''}, not ${activeConsole.toUpperCase()}. ` +
+          `Marked as [${consoleLabel(other.console)}] and skipping.`
+        );
+        return;
+      }
 
-    const isJpnOnly = sections.length > 0 && sections.every(s =>
-      /JPN|JAPAN/i.test(s.region)
-    );
-    if (isJpnOnly) {
-      setLabel(game.title, 'jpn', null);
-      spinner.stop();
-      logger.warn(`"${game.title}" has only Japanese sections. Marked as [JPN] and skipping.`);
-      return;
+      const isJpnOnly = sections.length > 0 && sections.every(s =>
+        /JPN|JAPAN/i.test(s.region)
+      );
+      if (isJpnOnly) {
+        setLabel(game.title, 'jpn', null);
+        spinner.stop();
+        logger.warn(`"${game.title}" has only Japanese sections. Marked as [JPN] and skipping.`);
+        return;
+      }
     }
 
     // Check if local library has PPSA
@@ -472,7 +474,7 @@ async function downloadCommand(titleQuery, options = {}) {
       const tbdList = [];
       for (const g of webList) {
         // Skip entries already labeled as another console (PS1/PS2 emu packages).
-        if (labelMap.has(g.normalizedTitle)) continue;
+        if (!options.force && labelMap.has(g.normalizedTitle)) continue;
         const matchInfo = getWebGameStatus(g, localMap, dlMap, excludedSet, localPpsaMap, dlPpsaMap, progressSet);
         if (matchInfo.status === 'tbd') {
           tbdList.push(g);
