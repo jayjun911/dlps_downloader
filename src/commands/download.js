@@ -10,7 +10,7 @@ const { getUniqueFilePath } = require('../utils/postProcessor');
 const { loadProgressSet, markProgress, clearProgress } = require('../services/progressDb');
 const { platformDataPath, getCurrentPlatformKey } = require('../services/platformConfig');
 const { setLabel } = require('../services/labelDb');
-const { classifyId, consoleLabel } = require('../utils/consoleClassifier');
+const { classifyId, consoleLabel, detectEmuConsole } = require('../utils/consoleClassifier');
 const logger = require('../utils/logger');
 const open = require('open');
 const readline = require('readline');
@@ -96,7 +96,7 @@ async function downloadSingleGame(game, options = {}) {
     const activeConsole = getCurrentPlatformKey();
     const detected = sections
       .map(s => {
-        const console = s.console || (classifyId(s.ppsa) || {}).console;
+        const console = s.console || (classifyId(s.ppsa) || {}).console || detectEmuConsole(s.region);
         return console ? { console, id: s.ppsa } : null;
       })
       .filter(Boolean);

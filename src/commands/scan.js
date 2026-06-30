@@ -2,7 +2,7 @@ const ora = require('ora');
 const chalk = require('chalk');
 const { getWebGameList, findGameInWebList, getGameSubpageData, isSubpageCached } = require('../services/webScraper');
 const { getCurrentPlatformKey } = require('../services/platformConfig');
-const { classifyId, consoleLabel } = require('../utils/consoleClassifier');
+const { classifyId, consoleLabel, detectEmuConsole } = require('../utils/consoleClassifier');
 const { setLabel, removeLabel, getLabel, loadLabelMap } = require('../services/labelDb');
 const { loadLocalLibrary } = require('../services/localLibrary');
 const { loadDownloadedGames } = require('../services/downloadedDb');
@@ -144,7 +144,7 @@ async function scanCommand(query, options = {}) {
       const { sections, languages } = await getGameSubpageData(g.slug, g.url, !!options.refresh);
       const detected = sections
         .map(s => {
-          const console = s.console || (classifyId(s.ppsa) || {}).console;
+          const console = s.console || (classifyId(s.ppsa) || {}).console || detectEmuConsole(s.region);
           return console ? { console, id: s.ppsa } : null;
         })
         .filter(Boolean);
