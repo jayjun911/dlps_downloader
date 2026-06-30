@@ -377,10 +377,16 @@ To bypass this block, please follow these steps:
             }
           }
           if (base64Payload) {
+            let sectionConsole;
+            try {
+              const payloadText = Buffer.from(base64Payload, 'base64').toString('utf-8');
+              sectionConsole = detectEmuConsole(payloadText) || undefined;
+            } catch (e) {}
             sections.push({
               ppsa,
               region: region || 'Unknown',
-              base64Payload
+              base64Payload,
+              ...(sectionConsole && { console: sectionConsole })
             });
           }
         }
