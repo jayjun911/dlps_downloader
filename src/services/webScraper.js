@@ -377,14 +377,15 @@ To bypass this block, please follow these steps:
             }
           }
           if (base64Payload) {
+            // An emu tag (e.g. [SATURNtoPS4]) inside the payload means this isn't a
+            // native title for the active console — mark it so the caller can skip.
             let sectionConsole;
             try {
-              const payloadText = Buffer.from(base64Payload, 'base64').toString('utf-8');
-              sectionConsole = detectEmuConsole(payloadText) || undefined;
+              sectionConsole = detectEmuConsole(Buffer.from(base64Payload, 'base64').toString('utf-8')) || undefined;
             } catch (e) {}
             sections.push({
               ppsa,
-              region: region || 'Unknown',
+              region: sectionConsole ? `${sectionConsole.toUpperCase()}toPS4` : (region || 'Unknown'),
               base64Payload,
               ...(sectionConsole && { console: sectionConsole })
             });
@@ -406,17 +407,8 @@ To bypass this block, please follow these steps:
         }
       }
       if (base64Payload) {
-        // If already added by the paragraph-based path, check if the payload
-        // contains an emu tag (e.g. [SATURNtoPS4]) and backfill console field.
-        const existing = sections.find(s => s.base64Payload === base64Payload);
-        if (existing) {
-          if (!existing.console) {
-            try {
-              const decodedText = Buffer.from(base64Payload, 'base64').toString('utf-8');
-              const emuConsole = detectEmuConsole(decodedText);
-              if (emuConsole) existing.console = emuConsole;
-            } catch (e) {}
-          }
+        // Avoid duplicate additions
+        if (sections.some(s => s.base64Payload === base64Payload)) {
           return;
         }
 
@@ -441,10 +433,15 @@ To bypass this block, please follow these steps:
           });
 
           if (ppsa) {
+            // Even with a valid title ID, an emu tag (e.g. [SATURNtoPS4]) means the
+            // package isn't a native title for the active console — mark it so the
+            // caller labels and skips it.
+            const emuConsole = detectEmuConsole($decoded.root().text());
             sections.push({
               ppsa,
-              region: region || 'Unknown',
-              base64Payload
+              region: emuConsole ? `${emuConsole.toUpperCase()}toPS4` : (region || 'Unknown'),
+              base64Payload,
+              ...(emuConsole && { console: emuConsole })
             });
           } else {
             // Emulation package (Saturn/PSP/...): no known title-ID prefix,
