@@ -71,11 +71,15 @@ async function handlePending() {
   }
 
   // Drop entries that are no longer TBD — resolved elsewhere since being queued
-  // (auto-labeled as another console/JPN, or already marked completed). Clean
+  // (auto-labeled as another console/JPN, already completed, or excluded). Clean
   // them out of the queue so only genuine manual candidates remain.
   const labelMap = loadLabelMap();
   const completedSet = new Set(loadDownloadedGames().map(g => g.normalizedTitle));
-  const stale = pending.filter(p => labelMap.has(p.normalizedTitle) || completedSet.has(p.normalizedTitle));
+  const { loadExcludedGames } = require('../services/excludedDb');
+  const excludedSet = new Set(loadExcludedGames().map(g => g.normalizedTitle));
+  const stale = pending.filter(p =>
+    labelMap.has(p.normalizedTitle) || completedSet.has(p.normalizedTitle) || excludedSet.has(p.normalizedTitle)
+  );
   if (stale.length > 0) {
     removePending(stale.map(p => p.normalizedTitle));
     pending = pending.filter(p => !stale.some(s => s.normalizedTitle === p.normalizedTitle));
