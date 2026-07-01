@@ -1,6 +1,7 @@
 const { findGameInWebList } = require('../services/webScraper');
 const { addDownloadedGame, loadDownloadedGames } = require('../services/downloadedDb');
 const { loadPending, removePending } = require('../services/pendingDb');
+const { loadLabelMap } = require('../services/labelDb');
 const { platformDataPath } = require('../services/platformConfig');
 const logger = require('../utils/logger');
 const readline = require('readline');
@@ -63,9 +64,25 @@ function parseSelection(input, max) {
  * any stragglers by number before committing.
  */
 async function handlePending() {
-  const pending = loadPending();
+  let pending = loadPending();
   if (pending.length === 0) {
     logger.info('No pending manual downloads. (Run `dlps download -l N -i` first.)');
+    return;
+  }
+
+  // Drop entries that are no longer TBD — resolved elsewhere since being queued
+  // (auto-labeled as another console/JPN, or already marked completed). Clean
+  // them out of the queue so only genuine manual candidates remain.
+  const labelMap = loadLabelMap();
+  const completedSet = new Set(loadDownloadedGames().map(g => g.normalizedTitle));
+  const stale = pending.filter(p => labelMap.has(p.normalizedTitle) || completedSet.has(p.normalizedTitle));
+  if (stale.length > 0) {
+    removePending(stale.map(p => p.normalizedTitle));
+    pending = pending.filter(p => !stale.some(s => s.normalizedTitle === p.normalizedTitle));
+    logger.info(`Removed ${stale.length} already-resolved game(s) from the pending queue.`);
+  }
+  if (pending.length === 0) {
+    logger.info('No pending manual downloads remaining.');
     return;
   }
 
