@@ -429,9 +429,13 @@ async function downloadSingleGame(game, options = {}) {
       logFailure(game.title, game.url, err.message);
       err.isHandled = true;
     }
-    // The batch handler opens this game's page in the browser under -i; queue it
+    // Open this game's page in the browser under -i for manual download; queue it
     // so it can later be batch-marked via `completed --pending`.
     if (options.interactive) {
+      try {
+        logger.info(`Opening game page for manual inspection: ${game.url}`);
+        await open(game.url);
+      } catch (openErr) {}
       addPending({ title: game.title, url: game.url, ppsa: bestKnownPpsa });
     }
     throw err;
@@ -534,12 +538,6 @@ async function downloadCommand(titleQuery, options = {}) {
               .catch(e => {
                 failedCount++;
                 logger.error(`Skipping "${game.title}": ${e.message}`);
-                if (options.interactive) {
-                  try {
-                    logger.info(`Opening game page for manual inspection: ${game.url}`);
-                    open(game.url);
-                  } catch (err) {}
-                }
               })
               .finally(() => {
                 clearProgress(game.normalizedTitle);
