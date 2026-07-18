@@ -20,7 +20,7 @@ function getFilenameFromDisposition(disposition) {
   return null;
 }
 
-async function get1fichierDirectUrlAndFilename(fileUrl) {
+async function get1fichierDirectUrlAndFilename(fileUrl, password = null) {
   const apiKey = process.env.FICHIER_API_KEY;
   if (!apiKey) throw new Error('FICHIER_API_KEY is not defined in environment variables.');
 
@@ -30,26 +30,44 @@ async function get1fichierDirectUrlAndFilename(fileUrl) {
     cleanUrl = `https://1fichier.com/?${match[2].toLowerCase()}`;
   }
 
+  const headers = {
+    'Authorization': `Bearer ${apiKey}`,
+    'Content-Type': 'application/json',
+    'User-Agent': USER_AGENT
+  };
+
   let tokenRes;
   try {
+    // Try without password first
     tokenRes = await axios.post(
       'https://api.1fichier.com/v1/download/get_token.cgi',
       { url: cleanUrl, single: 1 },
-      {
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-          'User-Agent': USER_AGENT
-        }
-      }
+      { headers }
     );
   } catch (err) {
-    if (err.response && err.response.status === 404) {
-      const e = new Error('File not found (404) on 1fichier. The link is likely dead or has been deleted.');
-      e.isLinkDead = true;
-      throw e;
+    if (err.response && (err.response.status === 403 || err.response.status === 401) && password) {
+      // Retry with password
+      try {
+        tokenRes = await axios.post(
+          'https://api.1fichier.com/v1/download/get_token.cgi',
+          { url: cleanUrl, single: 1, pass: password },
+          { headers }
+        );
+      } catch (retryErr) {
+        const msg = retryErr.response?.data?.message || retryErr.message;
+        throw new Error(`1fichier API error (tried with password): ${msg}. URL: ${cleanUrl}`);
+      }
+    } else if (err.response) {
+      if (err.response.status === 404) {
+        const e = new Error('File not found (404) on 1fichier. The link is likely dead or has been deleted.');
+        e.isLinkDead = true;
+        throw e;
+      }
+      const msg = err.response.data?.message || err.message;
+      throw new Error(`1fichier API error: ${msg}. URL: ${cleanUrl}`);
+    } else {
+      throw err;
     }
-    throw err;
   }
 
   if (tokenRes.data.status !== 'OK') {
@@ -227,7 +245,8 @@ function stripTemp(filename) {
 function pollForFile(destDir, expectedFilename, startedAt, onStatus) {
   return new Promise((resolve, reject) => {
     const POLL_MS = 3000;
-    const TIMEOUT_MS = 72 * 60 * 60 * 1000;
+    const timeoutMinutes = parseInt(process.env.FDM_TIMEOUT_MINUTES || '60', 10);
+    const TIMEOUT_MS = timeoutMinutes * 60 * 1000;
     // trackedName may change if FDM chose a slightly different filename
     let trackedName = expectedFilename;
 
@@ -240,7 +259,7 @@ function pollForFile(destDir, expectedFilename, startedAt, onStatus) {
       const elapsed = Date.now() - startedAt;
       if (elapsed > TIMEOUT_MS) {
         clearInterval(timer);
-        return reject(new Error('FDM download timed out (72 hours exceeded)'));
+        return resolve({ destPath: null, filename: trackedName, size: 0, skipped: true, fdmTimeout: true });
       }
 
       try {
@@ -284,7 +303,7 @@ function pollForFile(destDir, expectedFilename, startedAt, onStatus) {
  * @param {boolean} is1fichier True if the URL is a 1fichier link
  * @returns {Promise<{destPath: string, filename: string, size: number, skipped?: boolean}>}
  */
-async function downloadWithFdm(fileUrl, destDir, onStatus, is1fichier = false) {
+async function downloadWithFdm(fileUrl, destDir, onStatus, is1fichier = false, password = null) {
   if (!fs.existsSync(FDM_EXE)) {
     throw new Error(`Free Download Manager not found at: ${FDM_EXE}`);
   }
@@ -294,8 +313,12 @@ async function downloadWithFdm(fileUrl, destDir, onStatus, is1fichier = false) {
   if (onStatus) onStatus('Resolving direct download URL...');
 
   let directUrl, filename;
-  if (is1fichier) {
-    ({ directUrl, filename } = await get1fichierDirectUrlAndFilename(fileUrl));
+  if (/1fichier\.com|1file\.com/i.test(fileUrl)) {
+    ({ directUrl, filename } = await get1fichierDirectUrlAndFilename(fileUrl, password));
+  } else if (/mediafire\.com/i.test(fileUrl)) {
+    if (onStatus) onStatus('Resolving MediaFire URL...');
+    const { resolveMediafireDirectUrl } = require('./mediafireDownloader');
+    ({ directUrl, filename } = await resolveMediafireDirectUrl(fileUrl));
   } else {
     if (onStatus) onStatus('Resolving datanodes URL (may take a moment)...');
     ({ directUrl, filename } = await resolveDatanodesDirectUrl(fileUrl));
@@ -331,7 +354,7 @@ async function downloadWithFdm(fileUrl, destDir, onStatus, is1fichier = false) {
  *
  * @returns {Promise<Array<{destPath,filename,size,fileUrl,skipped?}>>}
  */
-async function downloadAllWithFdm(fileUrls, destDir, onStatus, is1fichier = false) {
+async function downloadAllWithFdm(fileUrls, destDir, onStatus, is1fichier = false, password = null) {
   if (!fs.existsSync(FDM_EXE)) throw new Error(`FDM not found at: ${FDM_EXE}`);
   if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
 
@@ -349,8 +372,11 @@ async function downloadAllWithFdm(fileUrls, destDir, onStatus, is1fichier = fals
 
     if (onStatus) onStatus(`${prefix}Resolving URL...`);
     let directUrl, filename;
-    if (is1fichier) {
-      ({ directUrl, filename } = await get1fichierDirectUrlAndFilename(fileUrl));
+    if (/1fichier\.com|1file\.com/i.test(fileUrl)) {
+      ({ directUrl, filename } = await get1fichierDirectUrlAndFilename(fileUrl, password));
+    } else if (/mediafire\.com/i.test(fileUrl)) {
+      const { resolveMediafireDirectUrl } = require('./mediafireDownloader');
+      ({ directUrl, filename } = await resolveMediafireDirectUrl(fileUrl));
     } else {
       ({ directUrl, filename } = await resolveDatanodesDirectUrl(fileUrl));
     }

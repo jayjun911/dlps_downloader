@@ -233,7 +233,7 @@ async function downloadSingleGame(game, options = {}) {
           logger.info(`Filtering downloads for type "${targetType}" (${bestLinks.urls.length} files matched)`);
         }
         
-        if (bestLinks.hostName === '1fichier' || bestLinks.hostName === 'Datanodes') {
+        if (bestLinks.hostName === '1fichier' || bestLinks.hostName === 'Datanodes' || bestLinks.hostName === 'Mediafire') {
           const downloadDir = options.out || process.env.DOWNLOAD_DIR || path.join(__dirname, '../../downloads');
           const downloadUrls = bestLinks.urls.filter(url => !url.startsWith('text_guide:'));
           const textGuideUrls = bestLinks.urls.filter(url => url.startsWith('text_guide:'));
@@ -250,15 +250,21 @@ async function downloadSingleGame(game, options = {}) {
                 downloadUrls,
                 downloadDir,
                 (status) => { fdmSpinner.text = `[FDM] ${status}`; },
-                bestLinks.hostName === '1fichier'
+                bestLinks.hostName === '1fichier',
+                options.password || bestLinks.password
               );
-              const skippedCount = fdmResults.filter(r => r.skipped).length;
-              const dlCount = fdmResults.length - skippedCount;
+              const timeoutCount = fdmResults.filter(r => r.fdmTimeout).length;
+              const skippedCount = fdmResults.filter(r => r.skipped && !r.fdmTimeout).length;
+              const dlCount = fdmResults.length - skippedCount - timeoutCount;
               fdmSpinner.succeed(
-                `[FDM] Done — ${dlCount} downloaded, ${skippedCount} skipped` +
+                `[FDM] Done — ${dlCount} downloaded, ${skippedCount} skipped, ${timeoutCount} timed out` +
                 ` (${fdmResults.map(r => r.filename).join(', ')})`
               );
               for (const r of fdmResults) {
+                if (r.fdmTimeout) {
+                  logger.warn(`[FDM] Download timed out for ${r.filename}. Skipping post-processing...`);
+                  continue;
+                }
                 const ui = bestLinks.urlInfo ? bestLinks.urlInfo.find(u => u.url === r.fileUrl) : null;
                 downloadedFiles.push({ filename: r.filename, type: ui ? ui.type : 'GAME', backportFw: ui ? ui.backportFw : null });
               }
@@ -292,10 +298,25 @@ async function downloadSingleGame(game, options = {}) {
                     },
                     (status) => { partSpinner.text = status; }
                   );
+                } else if (bestLinks.hostName === 'Mediafire') {
+                  const { downloadFromMediafire } = require('../services/mediafireDownloader');
+                  result = await downloadFromMediafire(fileUrl, downloadDir,
+                    (downloaded, total) => {
+                      const mb = (downloaded / 1024 / 1024).toFixed(1);
+                      if (total > 0) {
+                        const pct = Math.floor((downloaded / total) * 100);
+                        const totalMb = (total / 1024 / 1024).toFixed(1);
+                        partSpinner.text = `Downloading${typeLabel}${partLabel}: ${pct}% (${mb}MB / ${totalMb}MB)`;
+                      } else {
+                        partSpinner.text = `Downloading${typeLabel}${partLabel}: ${mb}MB...`;
+                      }
+                    },
+                    (status) => { partSpinner.text = status; }
+                  );
                 } else {
                   result = await download1fichier(fileUrl, downloadDir, (progress) => {
                     partSpinner.text = `Downloading${typeLabel}${partLabel}: ${progress.percent}% (${progress.receivedMB}MB / ${progress.totalMB}MB)`;
-                  });
+                  }, options.password || bestLinks.password);
                 }
 
                 if (result.skipped) {
@@ -393,12 +414,12 @@ async function downloadSingleGame(game, options = {}) {
           throw platformErr;
         }
 
-        if (err.isLinkDead && currentHostName) {
+        if (currentHostName) {
           skipHosts.push(currentHostName);
-          logger.warn(`\n[${regionInfo}] ${currentHostName} link is dead. Trying next available host...`);
+          logger.warn(`\n[${regionInfo}] ${currentHostName} failed: ${err.message}. Trying next available host...`);
           downloadedFiles = [];
         } else {
-          logger.warn(`\nAttempt failed for ${regionInfo}: ${err.message}. Trying next available option...`);
+          logger.warn(`\nAttempt failed for ${regionInfo}: ${err.message}.`);
           sectionDone = true;
         }
       }

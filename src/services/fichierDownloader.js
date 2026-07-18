@@ -41,7 +41,7 @@ function getFilenameFromDisposition(disposition) {
  * @param {function} onProgress callback for updating download progress
  * @returns {Promise<{destPath: string, filename: string, size: number}>}
  */
-async function download1fichier(fileUrl, destDir, onProgress) {
+async function download1fichier(fileUrl, destDir, onProgress, password = null) {
   const apiKey = process.env.FICHIER_API_KEY;
   if (!apiKey) {
     throw new Error('FICHIER_API_KEY is not defined in environment variables.');
@@ -58,27 +58,44 @@ async function download1fichier(fileUrl, destDir, onProgress) {
     cleanUrl = `https://1fichier.com/?${match[2].toLowerCase()}`;
   }
 
+  const headers = { 
+    'Authorization': `Bearer ${apiKey}`,
+    'Content-Type': 'application/json',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
+  };
+
   // ── Step 1: Request premium direct download URL ──
   let tokenRes;
   try {
     tokenRes = await axios.post(
       'https://api.1fichier.com/v1/download/get_token.cgi',
       { url: cleanUrl, single: 1 },
-      { 
-        headers: { 
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
-        } 
-      }
+      { headers }
     );
   } catch (err) {
-    if (err.response && err.response.status === 404) {
-      const e = new Error('File not found (404) on 1fichier. The download link is likely dead or has been deleted.');
-      e.isLinkDead = true;
-      throw e;
+    if (err.response && (err.response.status === 403 || err.response.status === 401) && password) {
+      // Retry with password
+      try {
+        tokenRes = await axios.post(
+          'https://api.1fichier.com/v1/download/get_token.cgi',
+          { url: cleanUrl, single: 1, pass: password },
+          { headers }
+        );
+      } catch (retryErr) {
+        const msg = retryErr.response?.data?.message || retryErr.message;
+        throw new Error(`1fichier API error (tried with password): ${msg}. URL: ${cleanUrl}`);
+      }
+    } else if (err.response) {
+      if (err.response.status === 404) {
+        const e = new Error('File not found (404) on 1fichier. The download link is likely dead or has been deleted.');
+        e.isLinkDead = true;
+        throw e;
+      }
+      const msg = err.response.data?.message || err.message;
+      throw new Error(`1fichier API error: ${msg}. URL: ${cleanUrl}`);
+    } else {
+      throw err;
     }
-    throw err;
   }
 
   if (tokenRes.data.status !== 'OK') {

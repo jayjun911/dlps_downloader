@@ -50,9 +50,9 @@ function getRegionPriority(regionName) {
 
 // Download host priority. Lower index represents higher priority.
 const HOST_PRIORITY_PATTERNS = [
-  /1fichier\.com|1file/i,
-  /datanodes\.to/i,
   /mediafire\.com/i,
+  /datanodes\.to/i,
+  /1fichier\.com|1file/i,
   /vikingfile\.com|viki/i,
   /akirabox\.com|akia/i,
   /mega\.nz|mega\.co\.nz/i,
@@ -208,7 +208,7 @@ function decodeAndExtractLinks(base64Payload) {
             try {
               const decodedUrl = Buffer.from(decodeURIComponent(urlMatch[1]), 'base64').toString('utf-8');
               if (decodedUrl.startsWith('http')) trimmedUrl = decodedUrl;
-            } catch (e) {}
+            } catch (e) { }
           }
         }
 
@@ -234,10 +234,10 @@ function decodeAndExtractLinks(base64Payload) {
           let updateVer = 0;
           let fwVer = 0;
           const text = g.rawText || g.links.map(l => l.url).join(' ');
-          
+
           const verMatch = text.match(/(?:update|patch|version|v)[\s-]*(\d+\.\d+)/i);
           if (verMatch) updateVer = parseFloat(verMatch[1]);
-          
+
           const fwMatches = text.match(/\b(\d+\.\d+)\b/g);
           if (fwMatches) {
             for (const match of fwMatches) {
@@ -247,7 +247,7 @@ function decodeAndExtractLinks(base64Payload) {
               }
             }
           }
-          
+
           if (updateVer > bestUpdateVer || (updateVer === bestUpdateVer && fwVer > bestFwVer)) {
             bestUpdateVer = updateVer;
             bestFwVer = fwVer;
@@ -298,7 +298,7 @@ function decodeAndExtractLinks(base64Payload) {
           try {
             const decodedUrl = Buffer.from(decodeURIComponent(urlMatch[1]), 'base64').toString('utf-8');
             if (decodedUrl.startsWith('http')) url = decodedUrl;
-          } catch (e) {}
+          } catch (e) { }
         }
       }
 
@@ -342,7 +342,7 @@ function decodeAndExtractLinks(base64Payload) {
           try {
             const decodedUrl = Buffer.from(decodeURIComponent(urlMatch[1]), 'base64').toString('utf-8');
             if (decodedUrl.startsWith('http')) url = decodedUrl;
-          } catch (e) {}
+          } catch (e) { }
         }
       }
 
@@ -367,10 +367,10 @@ function decodeAndExtractLinks(base64Payload) {
       let updateVer = 0;
       let fwVer = 0;
       const text = g.rawText || g.links.map(l => l.url).join(' ');
-      
+
       const verMatch = text.match(/(?:update|patch|version|v)[\s-]*(\d+\.\d+)/i);
       if (verMatch) updateVer = parseFloat(verMatch[1]);
-      
+
       const fwMatches = text.match(/\b(\d+\.\d+)\b/g);
       if (fwMatches) {
         for (const match of fwMatches) {
@@ -380,7 +380,7 @@ function decodeAndExtractLinks(base64Payload) {
           }
         }
       }
-      
+
       if (updateVer > bestUpdateVer || (updateVer === bestUpdateVer && fwVer > bestFwVer)) {
         bestUpdateVer = updateVer;
         bestFwVer = fwVer;
@@ -444,7 +444,7 @@ async function getBestDownloadLinks(sections, targetPPSA, { skipHosts = [], forc
           }
         }
       }
-      
+
       let finalUrls = [];
       let finalUrlInfos = [];
       let selectedHostNames = new Set();
@@ -509,7 +509,7 @@ async function getBestDownloadLinks(sections, targetPPSA, { skipHosts = [], forc
           if (sortedHostKeys.length > 0) {
             const bestHostIndex = sortedHostKeys[0];
             const bestUrls = groupedByHost[bestHostIndex];
-            
+
             for (const url of bestUrls) {
               if (!finalUrls.includes(url)) {
                 finalUrls.push(url);

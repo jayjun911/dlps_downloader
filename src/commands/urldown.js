@@ -10,6 +10,7 @@ const logger = require('../utils/logger');
 function detectService(url) {
   if (/1fichier\.com/i.test(url)) return '1fichier';
   if (/datanodes\.to/i.test(url)) return 'datanodes';
+  if (/mediafire\.com/i.test(url)) return 'mediafire';
   if (/vikingfile\.com|vik1ngfile\.site/i.test(url)) return 'vikingfile';
   return null;
 }
@@ -17,7 +18,7 @@ function detectService(url) {
 async function urldownCommand(url, options = {}) {
   if (!url) {
     logger.error('Usage: dlps urldown <url>');
-    logger.info('Supported: 1fichier.com, datanodes.to, vikingfile.com');
+    logger.info('Supported: 1fichier.com, datanodes.to, mediafire.com, vikingfile.com');
     return;
   }
 
@@ -33,7 +34,7 @@ async function urldownCommand(url, options = {}) {
 
   if (!service) {
     logger.error(`Unsupported URL: ${url}`);
-    logger.info('Supported: 1fichier.com, datanodes.to, vikingfile.com');
+    logger.info('Supported: 1fichier.com, datanodes.to, mediafire.com, vikingfile.com');
     return;
   }
 
@@ -44,6 +45,21 @@ async function urldownCommand(url, options = {}) {
   try {
     if (service === 'datanodes') {
       downloadResult = await downloadFromDatanodes(url, downloadDir,
+        (downloaded, total) => {
+          const mb = (downloaded / 1024 / 1024).toFixed(1);
+          if (total > 0) {
+            const pct = Math.floor((downloaded / total) * 100);
+            const totalMb = (total / 1024 / 1024).toFixed(1);
+            spinner.text = `Downloading ${mb} / ${totalMb} MB (${pct}%)`;
+          } else {
+            spinner.text = `Downloading ${mb} MB...`;
+          }
+        },
+        (status) => { spinner.text = status; }
+      );
+    } else if (service === 'mediafire') {
+      const { downloadFromMediafire } = require('../services/mediafireDownloader');
+      downloadResult = await downloadFromMediafire(url, downloadDir,
         (downloaded, total) => {
           const mb = (downloaded / 1024 / 1024).toFixed(1);
           if (total > 0) {
@@ -74,7 +90,7 @@ async function urldownCommand(url, options = {}) {
   }
 
   // Post-process: inspect archive, remove password, rename to standard format, register
-  const hostName = service === 'datanodes' ? 'Datanodes' : '1fichier';
+  const hostName = service === 'datanodes' ? 'Datanodes' : (service === 'mediafire' ? 'Mediafire' : '1fichier');
   const downloadedFiles = [{ filename: downloadResult.filename, type: 'GAME' }];
 
   try {

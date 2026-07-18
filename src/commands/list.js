@@ -9,7 +9,7 @@ const chalk = require('chalk');
 // it is interpreted as a search query against the default 'all' source.
 const KNOWN_SOURCES = new Set([
   'all', 'local', 'dl', 'downloaded', 'down', 'web', 'tbd', 'excluded', 'dupe',
-  'ps1', 'ps2', 'ps12', 'ps1-2', 'ps1/2', 'saturn', 'psp', 'other'
+  'ps1', 'ps2', 'ps12', 'ps1-2', 'ps1/2', 'saturn', 'psp', 'other', 'pending'
 ]);
 
 // A downloaded entry created by the `dupe` command (source "Manual (Dupe)").
@@ -103,6 +103,14 @@ async function listCommand(source = 'all', query = '', options = {}) {
         title: g.title,
         ppsa: '',
         status: 'excluded',
+        normalizedTitle: g.normalizedTitle
+      }));
+    } else if (normalizedSource === 'pending') {
+      const { loadPending } = require('../services/pendingDb');
+      displayList = loadPending().map(g => ({
+        title: g.title,
+        ppsa: g.ppsa || '',
+        status: 'pending',
         normalizedTitle: g.normalizedTitle
       }));
     } else if (['ps1', 'ps2', 'ps12', 'ps1-2', 'ps1/2', 'saturn', 'psp', 'other'].includes(normalizedSource)) {
@@ -243,6 +251,7 @@ async function listCommand(source = 'all', query = '', options = {}) {
         else if (game.status === 'dupe') statusStr = chalk.gray(statusStr);
         else if (game.status === 'tbd') statusStr = chalk.yellow(statusStr);
         else if (game.status === 'excluded') statusStr = chalk.red(statusStr);
+        else if (game.status === 'pending') statusStr = chalk.magenta(statusStr);
         else if (game.status === 'progress') statusStr = chalk.magenta(statusStr);
         else statusStr = chalk.gray(statusStr);
       }
