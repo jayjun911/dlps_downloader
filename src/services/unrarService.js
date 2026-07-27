@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { execSync, spawn } = require('child_process');
 const { deriveVersionFromParam, deriveTitleNameFromParam } = require('../utils/versionParser');
 
 const BIN_DIR = path.join(__dirname, '../../bin');
@@ -44,7 +44,10 @@ function requireBz() {
   return BZ_EXE_PATH;
 }
 
-const PASSWORD_FALLBACKS = ['www.DLPSGAME.COM', 'DLPSGAME.COM', 'www.dlpsgame.com', 'dlpsgame.com'];
+const PASSWORD_FALLBACKS = [
+  'www.DLPSGAME.COM', 'DLPSGAME.COM', 'www.dlpsgame.com', 'dlpsgame.com', '[DLPSGAME.COM]',
+  'www.DLPGAME.COM', 'DLPGAME.COM', '[DLPGAME.COM]', 'www.dlpgame.com', 'dlpgame.com'
+];
 
 function buildCandidates(password) {
   const candidates = password ? [password] : [];
@@ -86,26 +89,47 @@ async function isArchiveEncrypted(filePath) {
 /**
  * Extracts any archive (RAR/ZIP/7z) to a destination directory using Bandizip.
  */
-async function extractRarArchive(rarFilePath, destFolder, password) {
+async function extractRarArchive(rarFilePath, destFolder, password, onProgress) {
   const bz = requireBz();
 
   if (!fs.existsSync(destFolder)) {
     fs.mkdirSync(destFolder, { recursive: true });
   }
 
-  const pwd = password ? `-p:${password}` : '';
-  // Don't collapse whitespace in the command: archive/dest paths and inner names
-  // can contain runs of consecutive spaces, and squashing them breaks matching.
-  const cmd = `"${bz}" x -y ${pwd} -o:"${destFolder}" "${rarFilePath}"`;
-  try {
-    // Capture stderr only so a failure surfaces bz's actual reason. stdout is left
-    // ignored on purpose — bz x prints every extracted file there, which would
-    // overflow execSync's default maxBuffer on large archives.
-    execSync(cmd, { stdio: ['ignore', 'ignore', 'pipe'] });
-  } catch (err) {
-    const reason = (err.stderr && err.stderr.toString().trim()) || err.message;
-    throw new Error(`bz extraction failed: ${reason}`);
-  }
+  const args = ['x', '-y'];
+  if (password) args.push(`-p:${password}`);
+  args.push(`-o:${destFolder}`);
+  args.push(rarFilePath);
+
+  return new Promise((resolve, reject) => {
+    const child = spawn(bz, args, { shell: false });
+    
+    let stderrOut = '';
+    
+    child.stdout.on('data', (data) => {
+      if (onProgress) {
+        const text = data.toString().trim();
+        const lines = text.split('\n');
+        for (const line of lines) {
+          if (line.includes('Extracting')) {
+            onProgress(line.trim());
+          }
+        }
+      }
+    });
+
+    child.stderr.on('data', (data) => {
+      stderrOut += data.toString();
+    });
+
+    child.on('close', (code) => {
+      if (code !== 0) {
+        reject(new Error(`bz extraction failed: ${stderrOut.trim() || 'Code ' + code}`));
+      } else {
+        resolve();
+      }
+    });
+  });
 }
 
 /**
@@ -281,20 +305,76 @@ function findShallowestEbootDir(root) {
   return null;
 }
 
-async function compressFolderTo7z(folderPath, dest7zPath) {
+async function compressFolderTo7z(folderPath, dest7zPath, onProgress) {
   const bz = requireBz();
   const tmpPath = dest7zPath.replace(/\.7z$/i, '.compressing');
-  const cmd = `"${bz}" a -r -fmt:7z -l:5 -y "${tmpPath}" "${folderPath}\\*"`;
-  execSync(cmd, { stdio: 'ignore' });
-  fs.renameSync(tmpPath, dest7zPath);
+  const args = ['a', '-r', '-fmt:7z', '-l:5', '-y', tmpPath, `${folderPath}\\*`];
+  
+  return new Promise((resolve, reject) => {
+    const child = spawn(bz, args, { shell: false });
+    let stderrOut = '';
+
+    child.stdout.on('data', (data) => {
+      if (onProgress) {
+        const text = data.toString().trim();
+        const lines = text.split('\n');
+        for (const line of lines) {
+          if (line.includes('Compressing')) {
+            onProgress(line.trim());
+          }
+        }
+      }
+    });
+
+    child.stderr.on('data', (data) => {
+      stderrOut += data.toString();
+    });
+
+    child.on('close', (code) => {
+      if (code !== 0) {
+        reject(new Error(`bz compression failed: ${stderrOut.trim() || 'Code ' + code}`));
+      } else {
+        try { fs.renameSync(tmpPath, dest7zPath); } catch (e) {}
+        resolve();
+      }
+    });
+  });
 }
 
-async function compressFileTo7z(filePath, dest7zPath) {
+async function compressFileTo7z(filePath, dest7zPath, onProgress) {
   const bz = requireBz();
   const tmpPath = dest7zPath.replace(/\.7z$/i, '.compressing');
-  const cmd = `"${bz}" a -fmt:7z -l:5 -y "${tmpPath}" "${filePath}"`;
-  execSync(cmd, { stdio: 'ignore' });
-  fs.renameSync(tmpPath, dest7zPath);
+  const args = ['a', '-fmt:7z', '-l:5', '-y', tmpPath, filePath];
+  
+  return new Promise((resolve, reject) => {
+    const child = spawn(bz, args, { shell: false });
+    let stderrOut = '';
+
+    child.stdout.on('data', (data) => {
+      if (onProgress) {
+        const text = data.toString().trim();
+        const lines = text.split('\n');
+        for (const line of lines) {
+          if (line.includes('Compressing')) {
+            onProgress(line.trim());
+          }
+        }
+      }
+    });
+
+    child.stderr.on('data', (data) => {
+      stderrOut += data.toString();
+    });
+
+    child.on('close', (code) => {
+      if (code !== 0) {
+        reject(new Error(`bz compression failed: ${stderrOut.trim() || 'Code ' + code}`));
+      } else {
+        try { fs.renameSync(tmpPath, dest7zPath); } catch (e) {}
+        resolve();
+      }
+    });
+  });
 }
 
 module.exports = {

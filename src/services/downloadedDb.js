@@ -19,6 +19,9 @@ function loadDownloadedGames() {
 
   try {
     const xmlData = fs.readFileSync(DB_PATH, 'utf-8');
+    if (!xmlData.trim()) {
+      return [];
+    }
     const parser = new XMLParser({
       ignoreAttributes: false,
       isArray: (name) => ['Game'].includes(name)
@@ -37,6 +40,7 @@ function loadDownloadedGames() {
       normalizedTitle: normalizeTitle(g.Title || '')
     }));
   } catch (err) {
+    console.error(`[ERROR] Failed to parse XML file at ${DB_PATH}:`, err.message);
     return [];
   }
 }
@@ -80,6 +84,17 @@ function saveDownloadedGames(games) {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
+
+  // Backup existing file before overwrite
+  if (fs.existsSync(DB_PATH)) {
+    try {
+      const stats = fs.statSync(DB_PATH);
+      if (stats.size > 100) {
+        fs.copyFileSync(DB_PATH, DB_PATH + '.bak');
+      }
+    } catch (e) {}
+  }
+
   fs.writeFileSync(DB_PATH, xml, 'utf-8');
 }
 
@@ -126,7 +141,23 @@ function addDownloadedGame({ title, fileName, ppsa, password, source, region }) 
   saveDownloadedGames(games);
 }
 
+/**
+ * Removes a game entry from downloaded.xml by title.
+ */
+function removeDownloadedGame(title) {
+  const games = loadDownloadedGames();
+  const targetNorm = normalizeTitle(title);
+  const filtered = games.filter(g => normalizeTitle(g.title) !== targetNorm);
+  if (filtered.length < games.length) {
+    saveDownloadedGames(filtered);
+    return true;
+  }
+  return false;
+}
+
 module.exports = {
   loadDownloadedGames,
-  addDownloadedGame
+  saveDownloadedGames,
+  addDownloadedGame,
+  removeDownloadedGame
 };

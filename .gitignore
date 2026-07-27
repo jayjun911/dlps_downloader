@@ -16,3 +16,4 @@ flatten-audit-report.txt
 flatten-audit-console.log
 data/1.py
 data/pending_manual-ps4.json
+.claude/settings.local.json
