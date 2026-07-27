@@ -64,6 +64,7 @@ program
   .argument('[title]', 'Title of the game to mark as completed')
   .option('-r, --remove', 'Remove the game from the completed list')
   .option('--pending', 'Batch-mark games queued by `download -i` as completed (auto-detects downloaded GAME files)')
+  .option('-p, --password <string>', 'Archive password (if needed)')
   .description('Manage completed games list (add, remove, or list completed games)')
   .action((title, options) => {
     completedCommand(title, options);

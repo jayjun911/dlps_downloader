@@ -144,10 +144,20 @@ async function resolveDatanodesDirectUrl(fileUrl) {
   const step2 = await axios.get(downloadPageUrl, { headers: makeHeaders({ 'Referer': filePageUrl }), maxRedirects: 5 });
   updateCookies(step2);
 
-  // Extract fname — handle both attribute orders
-  const fnameInputMatch = step2.data.match(/<input[^>]*name="fname"[^>]*>/i);
-  const fnameValueMatch = fnameInputMatch && fnameInputMatch[0].match(/value="([^"]*)"/i);
-  const fname = (fnameValueMatch && fnameValueMatch[1]) ? fnameValueMatch[1] : fileId;
+  // Extract fname — handle both attribute orders, ignoring dummy "Free Download" input
+  const fnameInputs = [...step2.data.matchAll(/<input[^>]*name="fname"[^>]*value="([^"]*)"[^>]*>/gi)];
+  let fname = fileId;
+  for (const m of fnameInputs) {
+    if (m[1] && m[1] !== 'Free Download') {
+      fname = m[1];
+      break;
+    }
+  }
+  if (fname === fileId) {
+    const fnameInputMatch = step2.data.match(/<input[^>]*name="fname"[^>]*>/i);
+    const fnameValueMatch = fnameInputMatch && fnameInputMatch[0].match(/value="([^"]*)"/i);
+    if (fnameValueMatch && fnameValueMatch[1]) fname = fnameValueMatch[1];
+  }
 
   const step3 = await axios.post(downloadPageUrl, new URLSearchParams({
     op: 'download1', usr_login: '', id: fileId, fname, referer: filePageUrl, method_free: 'Free Download >>'

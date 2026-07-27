@@ -7,8 +7,8 @@
  */
 function extractPPSA(fileName) {
   if (!fileName) return null;
-  const match = fileName.match(/PPSA\d+/i);
-  return match ? match[0].toUpperCase() : null;
+  const match = fileName.match(/PPSA[-_]?\d+/i);
+  return match ? match[0].replace(/[-_]/g, '').toUpperCase() : null;
 }
 
 module.exports = {

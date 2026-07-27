@@ -43,15 +43,16 @@ function buildTypeTag(type, backportFw) {
 function isArchiveFile(file) {
   const lower = file.toLowerCase();
   return lower.endsWith('.rar') || lower.endsWith('.zip') || lower.endsWith('.7z') ||
-         /\.r\d{2}$/.test(lower) || /\.z\d{2}$/.test(lower);
+         /\.r\d{2}$/.test(lower) || /\.z\d{2}$/.test(lower) || /\.7z\.\d{3}$/.test(lower) || /\.\d{3}$/.test(lower) ||
+         /\.part[0-9]+\.(rar|zip|7z|r\d{2}|z\d{2})$/.test(lower);
 }
 
 function checkIsSplitArchive(archiveFiles) {
-  if (archiveFiles.length <= 1) return false;
+  if (archiveFiles.length > 1) return true;
   for (const file of archiveFiles) {
     const lower = file.toLowerCase();
     if (lower.match(/\.part[0-9]+\.(rar|zip|7z|r\d{2}|z\d{2})$/) ||
-        /\.r\d{2}$/.test(lower) || /\.z\d{2}$/.test(lower)) return true;
+        /\.r\d{2}$/.test(lower) || /\.z\d{2}$/.test(lower) || /\.7z\.\d{3}$/.test(lower) || /\.\d{3}$/.test(lower)) return true;
   }
   return false;
 }

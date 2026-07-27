@@ -8,8 +8,6 @@ scratch_check_tools.js
 scratch
 data/config.json
 # Per-platform local state (downloaded-ps5.xml, excluded-ps4.json, ...)
-data/downloaded*.xml
-data/excluded*.json
 data/failed_downloads*.json
 data/progress*.json
 data/labels*.json

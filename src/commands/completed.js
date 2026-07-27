@@ -36,7 +36,144 @@ function listDownloadDirNames() {
 function findGameFile(names, ppsa) {
   if (!ppsa || ppsa === 'Unknown') return null;
   const id = ppsa.toLowerCase();
-  return names.find(n => n.includes(id) && n.includes('[game]')) || null;
+  return names.find(n => n.includes(id) && (n.includes('[game]') || n.endsWith('.7z') || n.endsWith('.rar') || n.endsWith('.pkg'))) || null;
+}
+
+/**
+ * Processes archives in downloadDir for PS5 platform when running completed --pending.
+ * Searches for 7z/rar archives with PPSA numbers (e.g. PPSANNNNN), checks if password-protected or
+ * split (r01, r02, part1, etc.), unpacks and recompresses them to 7z, and renames them to standard format.
+ */
+async function processPendingArchivesPS5(downloadDir, pending, passwordOption = '') {
+  const { getCurrentPlatformKey } = require('../services/platformConfig');
+  if (getCurrentPlatformKey() !== 'ps5') return;
+
+  const ora = require('ora');
+  const {
+    extractRarArchive,
+    getGameInfoFromArchive,
+    compressFolderTo7z,
+    findShallowestEbootDir,
+    findWorkingPassword,
+    sanitizeFileName
+  } = require('../services/unrarService');
+
+  const {
+    isArchiveFile,
+    checkIsSplitArchive,
+    findMainArchiveFile,
+    getUniqueFilePath
+  } = require('../utils/postProcessor');
+
+  const { extractPPSA } = require('../utils/ppsaParser');
+
+  if (!fs.existsSync(downloadDir)) return;
+
+  let dirFiles = [];
+  try {
+    dirFiles = fs.readdirSync(downloadDir);
+  } catch (e) {
+    return;
+  }
+
+  // Filter all archive files that contain a PPSA (PPSA\d{5}) pattern
+  const ppsaArchivesMap = {};
+
+  for (const file of dirFiles) {
+    if (!isArchiveFile(file)) continue;
+    const ppsa = extractPPSA(file);
+    if (!ppsa) continue;
+
+    const key = ppsa.toUpperCase();
+    if (!ppsaArchivesMap[key]) ppsaArchivesMap[key] = [];
+    ppsaArchivesMap[key].push(file);
+  }
+
+  const ppsaKeys = Object.keys(ppsaArchivesMap);
+  if (ppsaKeys.length === 0) return;
+
+  logger.info(`[PS5] Found ${ppsaKeys.length} PPSA archive group(s) in download directory. Processing...`);
+
+  for (const ppsaKey of ppsaKeys) {
+    const archiveFiles = ppsaArchivesMap[ppsaKey];
+    const mainFileName = findMainArchiveFile(archiveFiles);
+    if (!mainFileName) continue;
+
+    const mainFilePath = path.join(downloadDir, mainFileName);
+    const matchingPending = pending.find(p => p.ppsa && p.ppsa.toUpperCase() === ppsaKey);
+
+    let finalTitle = matchingPending ? matchingPending.title : 'Unknown';
+    let finalPpsa = ppsaKey;
+    let finalVer = 'v01.00';
+    let workingPassword = passwordOption || '';
+
+    // Inspect internal metadata if possible
+    try {
+      const gameInfo = await getGameInfoFromArchive(mainFilePath, passwordOption);
+      if (gameInfo.titleId && gameInfo.titleId !== 'Unknown') finalPpsa = gameInfo.titleId;
+      if (gameInfo.titleName && gameInfo.titleName !== 'Unknown') finalTitle = gameInfo.titleName;
+      if (gameInfo.version) finalVer = gameInfo.version;
+      if (gameInfo.workingPassword) workingPassword = gameInfo.workingPassword;
+    } catch (e) {
+      // Internal metadata check failed or param.json missing. Try to find working password.
+      try {
+        const foundPwd = await findWorkingPassword(mainFilePath, passwordOption ? [passwordOption] : []);
+        if (foundPwd) workingPassword = foundPwd;
+      } catch (pwdErr) {}
+    }
+
+    const isSplit = checkIsSplitArchive(archiveFiles) || archiveFiles.length > 1;
+    const isEncrypted = workingPassword !== '';
+    const isRar = archiveFiles.some(f => f.toLowerCase().includes('.rar') || /\.r\d{2}$/i.test(f));
+    const isNotSingle7z = isRar || isSplit || isEncrypted || !mainFileName.toLowerCase().endsWith('.7z');
+
+    const baseNameLabel = `${sanitizeFileName(finalTitle)} [${finalPpsa}][${finalVer}] [Game]`;
+
+    if (isNotSingle7z) {
+      const processSpinner = ora(`[PS5] Extracting & recompressing ${ppsaKey} (${archiveFiles.length} file(s))...`).start();
+      const outputFolderPath = path.join(downloadDir, `temp_extract_${ppsaKey}_${Date.now()}`);
+
+      try {
+        await extractRarArchive(mainFilePath, outputFolderPath, workingPassword);
+
+        if (!fs.existsSync(outputFolderPath) || fs.readdirSync(outputFolderPath).length === 0) {
+          throw new Error(`Extraction output folder is empty: ${outputFolderPath}`);
+        }
+
+        // Clean up original archive files
+        for (const file of archiveFiles) {
+          try { fs.unlinkSync(path.join(downloadDir, file)); } catch (unlinkErr) {}
+        }
+
+        const dest7zPath = getUniqueFilePath(downloadDir, baseNameLabel, '.7z');
+        const compressRoot = findShallowestEbootDir(outputFolderPath) || outputFolderPath;
+
+        await compressFolderTo7z(compressRoot, dest7zPath);
+
+        if (!fs.existsSync(dest7zPath) || fs.statSync(dest7zPath).size === 0) {
+          throw new Error(`Recompressed 7z is empty: ${dest7zPath}`);
+        }
+
+        try { fs.rmSync(outputFolderPath, { recursive: true, force: true }); } catch (rmErr) {}
+
+        processSpinner.succeed(`[PS5] Processed and recompressed to: ${path.basename(dest7zPath)}`);
+      } catch (err) {
+        processSpinner.fail(`[PS5] Processing failed for ${ppsaKey}: ${err.message}`);
+        try { if (fs.existsSync(outputFolderPath)) fs.rmSync(outputFolderPath, { recursive: true, force: true }); } catch (e) {}
+      }
+    } else {
+      // Single .7z archive already, rename if needed
+      const dest7zPath = path.join(downloadDir, `${baseNameLabel}.7z`);
+      if (mainFilePath !== dest7zPath && !fs.existsSync(dest7zPath)) {
+        try {
+          fs.renameSync(mainFilePath, dest7zPath);
+          logger.success(`[PS5] Renamed archive: ${path.basename(dest7zPath)}`);
+        } catch (renameErr) {
+          logger.warn(`[PS5] Could not rename archive: ${renameErr.message}`);
+        }
+      }
+    }
+  }
 }
 
 /**
@@ -63,7 +200,7 @@ function parseSelection(input, max) {
  * Auto-detects which ones have their GAME file present, then lets the user add
  * any stragglers by number before committing.
  */
-async function handlePending() {
+async function handlePending(options = {}) {
   let pending = loadPending();
   if (pending.length === 0) {
     logger.info('No pending manual downloads. (Run `dlps download -l N -i` first.)');
@@ -89,6 +226,9 @@ async function handlePending() {
     logger.info('No pending manual downloads remaining.');
     return;
   }
+
+  // For PS5 platform, post-process any PPSA archives in download directory
+  await processPendingArchivesPS5(getDownloadDir(), pending, options.password || '');
 
   const names = listDownloadDirNames();
   const rows = pending.map(p => ({
@@ -203,7 +343,7 @@ async function completedCommand(titleQuery, options = {}) {
 
   // Batch-complete games queued for manual download via `download -i`.
   if (options.pending) {
-    return handlePending();
+    return handlePending(options);
   }
 
   // If no query is provided, print the list of currently completed games
