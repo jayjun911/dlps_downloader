@@ -466,17 +466,38 @@ To bypass this block, please follow these steps:
     }
   });
 
-  // Parse "Languages : Japanese, English" from the post body
+  // Parse "Languages : Japanese, English" or table metadata (LANGUAGE -> Multi / English)
   const languages = [];
-  $('.post-body.entry-content p, .post-body.entry-content li').each((_, el) => {
+
+  // 1. Parse HTML table rows (e.g. <td>LANGUAGE</td> <td>Multi</td>)
+  $('table tr').each((_, trEl) => {
+    const tds = $(trEl).find('td, th');
+    tds.each((idx, cellEl) => {
+      const cellText = $(cellEl).text().trim();
+      if (/^LANGUAGE(S)?$/i.test(cellText) || /^Languages?\s*[:：]?$/i.test(cellText)) {
+        const valueCell = tds.eq(idx + 1);
+        if (valueCell.length > 0) {
+          const valText = valueCell.text().trim();
+          if (valText) {
+            valText.split(/[,/|\n]+/).forEach(lang => {
+              const l = lang.trim();
+              if (l && !languages.includes(l)) languages.push(l);
+            });
+          }
+        }
+      }
+    });
+  });
+
+  // 2. Parse paragraphs, lists, divs, and table cells with "Languages: English"
+  $('.post-body.entry-content p, .post-body.entry-content li, .post-body.entry-content div, .post-body.entry-content td').each((_, el) => {
     const txt = $(el).text().trim();
     const m = txt.match(/^Languages?\s*[:：]\s*(.+)/i);
     if (m) {
-      m[1].split(/[,\/]/).forEach(lang => {
+      m[1].split(/[,/|\n]+/).forEach(lang => {
         const l = lang.trim();
-        if (l) languages.push(l);
+        if (l && !languages.includes(l)) languages.push(l);
       });
-      return false; // found — stop iterating
     }
   });
 

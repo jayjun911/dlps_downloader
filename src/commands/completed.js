@@ -33,10 +33,106 @@ function listDownloadDirNames() {
  * present in the download dir. GAME files carry the "[Game]" tag in their name
  * (the user's renamer convention); DLC/UPDATE/PATCH files don't.
  */
-function findGameFile(names, ppsa) {
-  if (!ppsa || ppsa === 'Unknown') return null;
-  const id = ppsa.toLowerCase();
-  return names.find(n => n.includes(id) && (n.includes('[game]') || n.endsWith('.7z') || n.endsWith('.rar') || n.endsWith('.pkg'))) || null;
+function findGameFile(names, ppsa, title) {
+  const { normalizeTitle } = require('../utils/titleNormalizer');
+  const ppsaId = (ppsa && ppsa !== 'Unknown') ? ppsa.toLowerCase() : null;
+  const normTitle = title ? normalizeTitle(title) : null;
+
+  return names.find(n => {
+    const lower = n.toLowerCase();
+
+    // 1. Match PPSA code in filename if PPSA is known (e.g. PPSA16265 or ppsa16265)
+    if (ppsaId && lower.includes(ppsaId)) return true;
+
+    // 2. Match normalized title in filename if title is known
+    if (normTitle && normTitle.length > 3) {
+      const cleanName = lower.replace(/[^a-z0-9]/g, '');
+      if (cleanName.includes(normTitle)) return true;
+    }
+
+    return false;
+  }) || null;
+}
+
+/**
+ * Resolves the game title using multiple fallback mechanisms:
+ * 1. Pending queue item matching PPSA
+ * 2. Pending queue item matching title in original filename
+ * 3. Downloaded DB (downloaded-ps5.xml) matching PPSA
+ * 4. Local library (PS5.xml) matching PPSA
+ * 5. Web game list matching PPSA
+ * 6. Cleaned title extracted from original archive filename
+ */
+async function resolveGameTitle(ppsaKey, mainFileName, pending = []) {
+  const { normalizeTitle } = require('../utils/titleNormalizer');
+
+  // 1. Pending queue item by PPSA
+  if (Array.isArray(pending) && pending.length > 0) {
+    const pendingMatch = pending.find(p => p.ppsa && p.ppsa.toUpperCase() === ppsaKey);
+    if (pendingMatch && pendingMatch.title && pendingMatch.title.toLowerCase() !== 'unknown') {
+      return pendingMatch.title;
+    }
+  }
+
+  // 2. Pending queue item by title match in filename
+  if (mainFileName && Array.isArray(pending) && pending.length > 0) {
+    const mainLower = mainFileName.toLowerCase();
+    const pendingTitleMatch = pending.find(p => {
+      if (!p.title) return false;
+      const norm = normalizeTitle(p.title);
+      return norm && (mainLower.includes(norm) || norm.includes(normalizeTitle(mainFileName)));
+    });
+    if (pendingTitleMatch && pendingTitleMatch.title) {
+      return pendingTitleMatch.title;
+    }
+  }
+
+  // 3. Single item pending queue fallback
+  if (Array.isArray(pending) && pending.length === 1 && pending[0].title && pending[0].title.toLowerCase() !== 'unknown') {
+    return pending[0].title;
+  }
+
+  // 3. Downloaded Database (downloaded-ps5.xml)
+  try {
+    const downloadedGames = loadDownloadedGames();
+    const dlMatch = downloadedGames.find(g => g.ppsa && g.ppsa.toUpperCase() === ppsaKey && g.title && g.title.toLowerCase() !== 'unknown');
+    if (dlMatch) return dlMatch.title;
+  } catch (e) {}
+
+  // 4. Local Library (PS5.xml)
+  try {
+    const { loadLocalLibrary } = require('../services/localLibrary');
+    const localGames = loadLocalLibrary();
+    const localMatch = localGames.find(lg => lg.ppsa && lg.ppsa.toUpperCase() === ppsaKey && lg.title && lg.title.toLowerCase() !== 'unknown');
+    if (localMatch) return localMatch.title;
+  } catch (e) {}
+
+  // 5. Web Game List
+  try {
+    const { getWebGameList } = require('../services/webScraper');
+    const webList = await getWebGameList();
+    const webMatch = webList.find(w => w.url && w.url.toUpperCase().includes(ppsaKey));
+    if (webMatch && webMatch.title) return webMatch.title;
+  } catch (e) {}
+
+  // 6. Extract clean title from original filename
+  if (mainFileName) {
+    let clean = mainFileName
+      .replace(/^unknown\s*/i, '')
+      .replace(/PPSA\d+/gi, '')
+      .replace(/\[v[0-9.]+\]/gi, '')
+      .replace(/\[game\]/gi, '')
+      .replace(/\[.*?\]/g, '')
+      .replace(/\.part[0-9]+\.(rar|zip|7z)$/i, '')
+      .replace(/\.(rar|zip|7z|r\d{2}|z\d{2})$/i, '')
+      .replace(/[-_.]+/g, ' ')
+      .trim();
+    if (clean && clean.toLowerCase() !== 'unknown') {
+      return clean;
+    }
+  }
+
+  return 'Unknown';
 }
 
 /**
@@ -100,9 +196,8 @@ async function processPendingArchivesPS5(downloadDir, pending, passwordOption = 
     if (!mainFileName) continue;
 
     const mainFilePath = path.join(downloadDir, mainFileName);
-    const matchingPending = pending.find(p => p.ppsa && p.ppsa.toUpperCase() === ppsaKey);
 
-    let finalTitle = matchingPending ? matchingPending.title : 'Unknown';
+    let finalTitle = 'Unknown';
     let finalPpsa = ppsaKey;
     let finalVer = 'v01.00';
     let workingPassword = passwordOption || '';
@@ -120,6 +215,11 @@ async function processPendingArchivesPS5(downloadDir, pending, passwordOption = 
         const foundPwd = await findWorkingPassword(mainFilePath, passwordOption ? [passwordOption] : []);
         if (foundPwd) workingPassword = foundPwd;
       } catch (pwdErr) {}
+    }
+
+    // Fallback title resolution if internal param.json didn't supply a valid title
+    if (!finalTitle || finalTitle === 'Unknown') {
+      finalTitle = await resolveGameTitle(ppsaKey, mainFileName, pending);
     }
 
     const isSplit = checkIsSplitArchive(archiveFiles) || archiveFiles.length > 1;
@@ -233,7 +333,7 @@ async function handlePending(options = {}) {
   const names = listDownloadDirNames();
   const rows = pending.map(p => ({
     entry: p,
-    file: findGameFile(names, p.ppsa),
+    file: findGameFile(names, p.ppsa, p.title),
   }));
 
   console.log(chalk.cyan(`\nPending manual downloads (${rows.length}):`));
@@ -387,21 +487,24 @@ async function completedCommand(titleQuery, options = {}) {
         console.log(`  [${idx + 1}] ${game.title}`);
       });
 
-      const rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout
-      });
+      await new Promise((resolve) => {
+        const rl = readline.createInterface({
+          input: process.stdin,
+          output: process.stdout
+        });
 
-      rl.question(chalk.cyan('\nSelect a game number to remove from completed list (or press Enter to cancel): '), (answer) => {
-        rl.close();
-        const num = parseInt(answer.trim(), 10);
-        if (num > 0 && num <= matches.length) {
-          const selected = matches[num - 1];
-          removeDownloadedGame(selected.title);
-          logger.success(`Successfully removed from completed list: "${selected.title}"`);
-        } else {
-          logger.info('Cancelled.');
-        }
+        rl.question(chalk.cyan('\nSelect a game number to remove from completed list (or press Enter to cancel): '), (answer) => {
+          rl.close();
+          const num = parseInt(answer.trim(), 10);
+          if (num > 0 && num <= matches.length) {
+            const selected = matches[num - 1];
+            removeDownloadedGame(selected.title);
+            logger.success(`Successfully removed from completed list: "${selected.title}"`);
+          } else {
+            logger.info('Cancelled.');
+          }
+          resolve();
+        });
       });
       return;
     }
@@ -411,26 +514,29 @@ async function completedCommand(titleQuery, options = {}) {
     
     if (matches.length === 0) {
       // Ask if the user wants to mark this exact title as completed anyway
-      const rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout
-      });
+      await new Promise((resolve) => {
+        const rl = readline.createInterface({
+          input: process.stdin,
+          output: process.stdout
+        });
 
-      rl.question(chalk.yellow(`No games matching "${titleQuery}" found in the web list. Mark this exact title as completed anyway? (y/N): `), (answer) => {
-        rl.close();
-        if (answer.trim().toLowerCase() === 'y') {
-          addDownloadedGame({
-            title: titleQuery,
-            fileName: 'Manual Entry',
-            ppsa: 'Unknown',
-            password: '',
-            source: 'Manual',
-            region: 'Unknown'
-          });
-          logger.success(`Successfully marked as completed: "${titleQuery}"`);
-        } else {
-          logger.info('Cancelled.');
-        }
+        rl.question(chalk.yellow(`No games matching "${titleQuery}" found in the web list. Mark this exact title as completed anyway? (y/N): `), (answer) => {
+          rl.close();
+          if (answer.trim().toLowerCase() === 'y') {
+            addDownloadedGame({
+              title: titleQuery,
+              fileName: 'Manual Entry',
+              ppsa: 'Unknown',
+              password: '',
+              source: 'Manual',
+              region: 'Unknown'
+            });
+            logger.success(`Successfully marked as completed: "${titleQuery}"`);
+          } else {
+            logger.info('Cancelled.');
+          }
+          resolve();
+        });
       });
       return;
     }
@@ -459,31 +565,34 @@ async function completedCommand(titleQuery, options = {}) {
       console.log(`  [${idx + 1}] ${game.title} (${game.url})`);
     });
 
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout
-    });
+    await new Promise((resolve) => {
+      const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout
+      });
 
-    rl.question(chalk.cyan('\nSelect a game number to mark as completed (or press Enter to cancel): '), (answer) => {
-      rl.close();
-      const num = parseInt(answer.trim(), 10);
-      if (num > 0 && num <= matches.length) {
-        const selected = matches[num - 1];
-        const ppsaMatch = selected.url.match(/ppsa\d{5}/i);
-        const parsedPpsa = ppsaMatch ? ppsaMatch[0].toUpperCase() : 'Unknown';
-        
-        addDownloadedGame({
-          title: selected.title,
-          fileName: 'Manual Entry',
-          ppsa: parsedPpsa,
-          password: '',
-          source: 'Manual',
-          region: 'Unknown'
-        });
-        logger.success(`Successfully marked as completed: "${selected.title}" (PPSA: ${parsedPpsa})`);
-      } else {
-        logger.info('Cancelled.');
-      }
+      rl.question(chalk.cyan('\nSelect a game number to mark as completed (or press Enter to cancel): '), (answer) => {
+        rl.close();
+        const num = parseInt(answer.trim(), 10);
+        if (num > 0 && num <= matches.length) {
+          const selected = matches[num - 1];
+          const ppsaMatch = selected.url.match(/ppsa\d{5}/i);
+          const parsedPpsa = ppsaMatch ? ppsaMatch[0].toUpperCase() : 'Unknown';
+          
+          addDownloadedGame({
+            title: selected.title,
+            fileName: 'Manual Entry',
+            ppsa: parsedPpsa,
+            password: '',
+            source: 'Manual',
+            region: 'Unknown'
+          });
+          logger.success(`Successfully marked as completed: "${selected.title}" (PPSA: ${parsedPpsa})`);
+        } else {
+          logger.info('Cancelled.');
+        }
+        resolve();
+      });
     });
 
   } catch (err) {

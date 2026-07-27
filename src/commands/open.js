@@ -54,9 +54,7 @@ async function openCommand(titleQuery, options = {}) {
       const selected = matches[0];
       logger.info(`Opening: "${selected.title}" (${selected.url})`);
       await open(selected.url);
-      if (options.interactive) {
-        await handleInteractiveOpen(selected);
-      }
+      await handleInteractiveOpen(selected);
       return;
     }
 
@@ -66,24 +64,25 @@ async function openCommand(titleQuery, options = {}) {
       console.log(`  [${idx + 1}] ${game.title} (${game.url})`);
     });
     
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout
-    });
+    await new Promise((resolve) => {
+      const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout
+      });
 
-    rl.question(chalk.cyan('\nSelect a game number to open (or press Enter to cancel): '), async (answer) => {
-      rl.close();
-      const num = parseInt(answer.trim(), 10);
-      if (num > 0 && num <= matches.length) {
-        const selected = matches[num - 1];
-        logger.info(`Opening: "${selected.title}" (${selected.url})`);
-        await open(selected.url);
-        if (options.interactive) {
+      rl.question(chalk.cyan('\nSelect a game number to open (or press Enter to cancel): '), async (answer) => {
+        rl.close();
+        const num = parseInt(answer.trim(), 10);
+        if (num > 0 && num <= matches.length) {
+          const selected = matches[num - 1];
+          logger.info(`Opening: "${selected.title}" (${selected.url})`);
+          await open(selected.url);
           await handleInteractiveOpen(selected);
+        } else {
+          logger.info('Cancelled.');
         }
-      } else {
-        logger.info('Cancelled.');
-      }
+        resolve();
+      });
     });
 
   } catch (err) {

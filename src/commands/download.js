@@ -116,14 +116,17 @@ async function downloadSingleGame(game, options = {}) {
         return 'skipped';
       }
 
-      const isJpnOnly = sections.length > 0 && sections.every(s =>
-        /JPN|JAPAN/i.test(s.region)
+      const hasNonJpnLang = languages.some(l =>
+        /\b(multi|multi5|multilanguage|multi-language|english|korean|en|ko|zh|chinese|asia|global|all|world)\b/i.test(l)
       );
-      const hasEnOrKo = languages.some(l => /\b(english|korean|en|ko)\b/i.test(l));
-      if (isJpnOnly && !hasEnOrKo) {
+      const isJpnOnly = sections.length > 0 &&
+        sections.every(s => /JPN|JAPAN/i.test(s.region)) &&
+        !hasNonJpnLang;
+
+      if (isJpnOnly) {
         setLabel(game.title, 'jpn', null);
         spinner.stop();
-        logger.warn(`"${game.title}" has only Japanese sections. Marked as [JPN] and skipping.`);
+        logger.warn(`"${game.title}" has only Japanese sections and no Multi/EN/KO languages. Marked as [JPN] and skipping.`);
         return 'skipped';
       }
     }
@@ -633,23 +636,26 @@ async function downloadCommand(titleQuery, options = {}) {
       console.log(`  [${idx + 1}] ${game.title} (${game.url})`);
     });
 
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout
-    });
+    await new Promise((resolve) => {
+      const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout
+      });
 
-    rl.question(chalk.cyan('\nSelect a game number to download (or press Enter to cancel): '), async (answer) => {
-      rl.close();
-      const num = parseInt(answer.trim(), 10);
-      if (num > 0 && num <= matches.length) {
-        try {
-          await downloadSingleGame(matches[num - 1], options);
-        } catch (err) {
-          if (!err.isHandled) logger.error(err.message);
+      rl.question(chalk.cyan('\nSelect a game number to download (or press Enter to cancel): '), async (answer) => {
+        rl.close();
+        const num = parseInt(answer.trim(), 10);
+        if (num > 0 && num <= matches.length) {
+          try {
+            await downloadSingleGame(matches[num - 1], options);
+          } catch (err) {
+            if (!err.isHandled) logger.error(err.message);
+          }
+        } else {
+          logger.info('Cancelled.');
         }
-      } else {
-        logger.info('Cancelled.');
-      }
+        resolve();
+      });
     });
 
   } catch (err) {

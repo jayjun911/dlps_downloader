@@ -49,17 +49,20 @@ async function typeCommand(titleQuery, consoleType, options = {}) {
         console.log(`  [${idx + 1}] ${l.title} (${l.console})`);
       });
 
-      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-      rl.question(chalk.cyan('\nSelect a game number to remove its type (or press Enter to cancel): '), (answer) => {
-        rl.close();
-        const num = parseInt(answer.trim(), 10);
-        if (num > 0 && num <= matches.length) {
-          const selected = matches[num - 1];
-          removeLabel(selected.title);
-          logger.success(`Successfully removed type for: "${selected.title}"`);
-        } else {
-          logger.info('Cancelled.');
-        }
+      await new Promise((resolve) => {
+        const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+        rl.question(chalk.cyan('\nSelect a game number to remove its type (or press Enter to cancel): '), (answer) => {
+          rl.close();
+          const num = parseInt(answer.trim(), 10);
+          if (num > 0 && num <= matches.length) {
+            const selected = matches[num - 1];
+            removeLabel(selected.title);
+            logger.success(`Successfully removed type for: "${selected.title}"`);
+          } else {
+            logger.info('Cancelled.');
+          }
+          resolve();
+        });
       });
       return;
     }
@@ -82,15 +85,18 @@ async function typeCommand(titleQuery, consoleType, options = {}) {
     const matches = await findGameInWebList(titleQuery);
 
     if (matches.length === 0) {
-      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-      rl.question(chalk.yellow(`No games matching "${titleQuery}" found in the web list. Apply type to this exact string anyway? (y/N): `), (answer) => {
-        rl.close();
-        if (answer.trim().toLowerCase() === 'y') {
-          setLabel(titleQuery, finalConsole, '');
-          logger.success(`Successfully set type for: "${titleQuery}" to ${finalConsole}`);
-        } else {
-          logger.info('Cancelled.');
-        }
+      await new Promise((resolve) => {
+        const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+        rl.question(chalk.yellow(`No games matching "${titleQuery}" found in the web list. Apply type to this exact string anyway? (y/N): `), (answer) => {
+          rl.close();
+          if (answer.trim().toLowerCase() === 'y') {
+            setLabel(titleQuery, finalConsole, '');
+            logger.success(`Successfully set type for: "${titleQuery}" to ${finalConsole}`);
+          } else {
+            logger.info('Cancelled.');
+          }
+          resolve();
+        });
       });
       return;
     }
@@ -107,17 +113,20 @@ async function typeCommand(titleQuery, consoleType, options = {}) {
       console.log(`  [${idx + 1}] ${game.title} (${game.url})`);
     });
 
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-    rl.question(chalk.cyan('\nSelect a game number to type (or press Enter to cancel): '), (answer) => {
-      rl.close();
-      const num = parseInt(answer.trim(), 10);
-      if (num > 0 && num <= matches.length) {
-        const selected = matches[num - 1];
-        setLabel(selected.title, finalConsole, selected.id || '');
-        logger.success(`Successfully set type for: "${selected.title}" to ${finalConsole}`);
-      } else {
-        logger.info('Cancelled.');
-      }
+    await new Promise((resolve) => {
+      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+      rl.question(chalk.cyan('\nSelect a game number to type (or press Enter to cancel): '), (answer) => {
+        rl.close();
+        const num = parseInt(answer.trim(), 10);
+        if (num > 0 && num <= matches.length) {
+          const selected = matches[num - 1];
+          setLabel(selected.title, finalConsole, selected.id || '');
+          logger.success(`Successfully set type for: "${selected.title}" to ${finalConsole}`);
+        } else {
+          logger.info('Cancelled.');
+        }
+        resolve();
+      });
     });
 
   } catch (err) {

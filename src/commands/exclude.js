@@ -54,21 +54,24 @@ async function excludeCommand(titleQuery, options = {}) {
         console.log(`  [${idx + 1}] ${game.title}`);
       });
 
-      const rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout
-      });
+      await new Promise((resolve) => {
+        const rl = readline.createInterface({
+          input: process.stdin,
+          output: process.stdout
+        });
 
-      rl.question(chalk.cyan('\nSelect a game number to remove from exclusions (or press Enter to cancel): '), (answer) => {
-        rl.close();
-        const num = parseInt(answer.trim(), 10);
-        if (num > 0 && num <= matches.length) {
-          const selected = matches[num - 1];
-          removeExcludedGame(selected.title);
-          logger.success(`Successfully removed from exclusions: "${selected.title}"`);
-        } else {
-          logger.info('Cancelled.');
-        }
+        rl.question(chalk.cyan('\nSelect a game number to remove from exclusions (or press Enter to cancel): '), (answer) => {
+          rl.close();
+          const num = parseInt(answer.trim(), 10);
+          if (num > 0 && num <= matches.length) {
+            const selected = matches[num - 1];
+            removeExcludedGame(selected.title);
+            logger.success(`Successfully removed from exclusions: "${selected.title}"`);
+          } else {
+            logger.info('Cancelled.');
+          }
+          resolve();
+        });
       });
       return;
     }
@@ -78,19 +81,22 @@ async function excludeCommand(titleQuery, options = {}) {
     
     if (matches.length === 0) {
       // If not found in the web list, ask if the user wants to exclude this exact string anyway
-      const rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout
-      });
+      await new Promise((resolve) => {
+        const rl = readline.createInterface({
+          input: process.stdin,
+          output: process.stdout
+        });
 
-      rl.question(chalk.yellow(`No games matching "${titleQuery}" found in the web list. Exclude this exact title anyway? (y/N): `), (answer) => {
-        rl.close();
-        if (answer.trim().toLowerCase() === 'y') {
-          addExcludedGame(titleQuery);
-          logger.success(`Successfully added to exclusions: "${titleQuery}"`);
-        } else {
-          logger.info('Cancelled.');
-        }
+        rl.question(chalk.yellow(`No games matching "${titleQuery}" found in the web list. Exclude this exact title anyway? (y/N): `), (answer) => {
+          rl.close();
+          if (answer.trim().toLowerCase() === 'y') {
+            addExcludedGame(titleQuery);
+            logger.success(`Successfully added to exclusions: "${titleQuery}"`);
+          } else {
+            logger.info('Cancelled.');
+          }
+          resolve();
+        });
       });
       return;
     }
@@ -112,25 +118,28 @@ async function excludeCommand(titleQuery, options = {}) {
       console.log(`  [${idx + 1}] ${game.title} (${game.url})`);
     });
 
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout
-    });
+    await new Promise((resolve) => {
+      const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout
+      });
 
-    rl.question(chalk.cyan('\nSelect a game number to exclude (or press Enter to cancel): '), (answer) => {
-      rl.close();
-      const num = parseInt(answer.trim(), 10);
-      if (num > 0 && num <= matches.length) {
-        const selected = matches[num - 1];
-        const added = addExcludedGame(selected.title);
-        if (added) {
-          logger.success(`Successfully added to exclusions: "${selected.title}"`);
+      rl.question(chalk.cyan('\nSelect a game number to exclude (or press Enter to cancel): '), (answer) => {
+        rl.close();
+        const num = parseInt(answer.trim(), 10);
+        if (num > 0 && num <= matches.length) {
+          const selected = matches[num - 1];
+          const added = addExcludedGame(selected.title);
+          if (added) {
+            logger.success(`Successfully added to exclusions: "${selected.title}"`);
+          } else {
+            logger.info(`"${selected.title}" is already excluded.`);
+          }
         } else {
-          logger.info(`"${selected.title}" is already excluded.`);
+          logger.info('Cancelled.');
         }
-      } else {
-        logger.info('Cancelled.');
-      }
+        resolve();
+      });
     });
 
   } catch (err) {
