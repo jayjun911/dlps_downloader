@@ -149,6 +149,7 @@ async function processPendingArchivesPS5(downloadDir, pending = [], passwordOpti
     compressFolderTo7z,
     findShallowestEbootDir,
     findWorkingPassword,
+    findParamJson,
     sanitizeFileName
   } = require('../services/unrarService');
 
@@ -182,47 +183,167 @@ async function processPendingArchivesPS5(downloadDir, pending = [], passwordOpti
     const ppsaKey = pendingEntry.ppsa.toUpperCase();
     const normPendingTitle = normalizeTitle(pendingEntry.title);
 
-    // Find files matching this pending entry's PPSA or title
-    const matchedFiles = dirFiles.filter(file => {
-      const filePpsa = extractPPSA(file);
+    // Find files and folders matching this pending entry's PPSA or title
+    const matchedItems = dirFiles.filter(item => {
+      const fullPath = path.join(downloadDir, item);
+      let isDir = false;
+      try { isDir = fs.statSync(fullPath).isDirectory(); } catch (e) {}
+
+      if (isDir) {
+        if (item.startsWith('.')) return false;
+
+        const itemPpsa = extractPPSA(item);
+        if (itemPpsa && itemPpsa.toUpperCase() === ppsaKey) return true;
+
+        const paramFile = findParamJson(fullPath);
+        if (paramFile) {
+          try {
+            const rawParam = fs.readFileSync(paramFile, 'utf-8');
+            const parsedParam = JSON.parse(rawParam);
+            if (parsedParam.titleId && parsedParam.titleId.toUpperCase() === ppsaKey) {
+              return true;
+            }
+          } catch (e) {}
+        }
+
+        if (normPendingTitle && normPendingTitle.length > 5) {
+          const normItem = normalizeTitle(item);
+          if (normItem.includes(normPendingTitle)) return true;
+        }
+        return false;
+      }
+
+      const filePpsa = extractPPSA(item);
       if (filePpsa && filePpsa.toUpperCase() === ppsaKey) return true;
 
-      // Title match only if no PPSA in filename and title is long enough
       if (!filePpsa && normPendingTitle && normPendingTitle.length > 5) {
-        const normFile = normalizeTitle(file);
+        const normFile = normalizeTitle(item);
         if (normFile.includes(normPendingTitle)) return true;
       }
       return false;
     });
 
-    if (matchedFiles.length === 0) continue;
+    if (matchedItems.length === 0) continue;
 
-    // Categorize matched files
-    const exfatFiles = matchedFiles.filter(f => f.toLowerCase().endsWith('.exfat'));
-    const ffpkgFiles = matchedFiles.filter(f => f.toLowerCase().endsWith('.ffpkg'));
-    const archiveFiles = matchedFiles.filter(isArchiveFile);
+    const matchedFolders = matchedItems.filter(f => {
+      try { return fs.statSync(path.join(downloadDir, f)).isDirectory(); } catch (e) { return false; }
+    });
+
+    const matchedFiles = matchedItems.filter(f => {
+      try { return !fs.statSync(path.join(downloadDir, f)).isDirectory(); } catch (e) { return false; }
+    });
 
     let finalTitle = pendingEntry.title;
     let finalPpsa = ppsaKey;
     let finalVer = 'v01.00';
     let workingPassword = passwordOption || '';
 
-    const mainFileName = findMainArchiveFile(archiveFiles) || matchedFiles[0];
+    // Process matching uncompressed folders
+    for (const folderName of matchedFolders) {
+      const folderPath = path.join(downloadDir, folderName);
+      let folderTitle = finalTitle;
+      let folderPpsa = finalPpsa;
+      let folderVer = finalVer;
+
+      const paramPath = findParamJson(folderPath);
+      if (paramPath) {
+        try {
+          const rawParam = fs.readFileSync(paramPath, 'utf-8');
+          const parsedParam = JSON.parse(rawParam);
+          const { deriveVersionFromParam, deriveTitleNameFromParam } = require('../utils/versionParser');
+          if (parsedParam.titleId && parsedParam.titleId !== 'Unknown') folderPpsa = parsedParam.titleId;
+          const parsedTitle = deriveTitleNameFromParam(parsedParam);
+          if (parsedTitle) folderTitle = sanitizeFileName(parsedTitle);
+          folderVer = deriveVersionFromParam(parsedParam);
+        } catch (e) {}
+      }
+
+      const folderBaseNameLabel = `${sanitizeFileName(folderTitle)} [${folderPpsa}][${folderVer}] [Game]`;
+      const dest7zPath = getUniqueFilePath(downloadDir, folderBaseNameLabel, '.7z');
+      const compressRoot = findShallowestEbootDir(folderPath) || folderPath;
+
+      logger.info(`[PS5] Found matching uncompressed folder "${folderName}" for ${folderPpsa}`);
+      const compressSpinner = ora(`[PS5] Compressing folder to ${path.basename(dest7zPath)}...`).start();
+
+      try {
+        await compressFolderTo7z(compressRoot, dest7zPath, (text) => {
+          compressSpinner.text = `[PS5] [Compressing] ${folderPpsa} - ${text}`;
+        });
+
+        if (!fs.existsSync(dest7zPath) || fs.statSync(dest7zPath).size === 0) {
+          throw new Error(`Compressed 7z is empty: ${dest7zPath}`);
+        }
+
+        try {
+          fs.rmSync(folderPath, { recursive: true, force: true });
+        } catch (rmErr) {
+          logger.warn(`[PS5] Could not remove original folder: ${rmErr.message}`);
+        }
+
+        compressSpinner.succeed(`[PS5] Processed and compressed folder to: ${path.basename(dest7zPath)}`);
+        processedCount++;
+        finalTitle = folderTitle;
+        finalPpsa = folderPpsa;
+        finalVer = folderVer;
+      } catch (err) {
+        compressSpinner.fail(`[PS5] Folder compression failed for ${folderName}: ${err.message}`);
+      }
+    }
+
+    const mainFileName = findMainArchiveFile(matchedFiles) || matchedFiles[0];
     const mainFilePath = mainFileName ? path.join(downloadDir, mainFileName) : null;
 
     // Try to read internal metadata from archive
     if (mainFilePath && isArchiveFile(mainFileName)) {
+      const inspectSpinner = ora(`[PS5] Inspecting archive metadata (${ppsaKey})...`).start();
       try {
-        const gameInfo = await getGameInfoFromArchive(mainFilePath, passwordOption);
+        const gameInfo = await getGameInfoFromArchive(mainFilePath, passwordOption, (statusText) => {
+          inspectSpinner.text = `[PS5] Inspecting archive metadata (${ppsaKey}) - ${statusText}`;
+        });
         if (gameInfo.titleId && gameInfo.titleId !== 'Unknown') finalPpsa = gameInfo.titleId;
         if (gameInfo.titleName && gameInfo.titleName !== 'Unknown') finalTitle = gameInfo.titleName;
         if (gameInfo.version) finalVer = gameInfo.version;
         if (gameInfo.workingPassword) workingPassword = gameInfo.workingPassword;
+        inspectSpinner.succeed(`[PS5] Read archive metadata (${ppsaKey}): ${finalTitle} [${finalVer}]`);
       } catch (e) {
+        inspectSpinner.text = `[PS5] Searching password for ${ppsaKey}...`;
         try {
-          const foundPwd = await findWorkingPassword(mainFilePath, passwordOption ? [passwordOption] : []);
+          const foundPwd = await findWorkingPassword(mainFilePath, passwordOption ? [passwordOption] : [], (statusText) => {
+            inspectSpinner.text = `[PS5] Searching password (${ppsaKey}) - ${statusText}`;
+          });
           if (foundPwd) workingPassword = foundPwd;
-        } catch (pwdErr) {}
+          inspectSpinner.stop();
+        } catch (pwdErr) {
+          inspectSpinner.stop();
+        }
+      }
+    }
+
+    // Mount and validate exfat files via OSFMount
+    for (const exf of exfatFiles) {
+      const srcPath = path.join(downloadDir, exf);
+      const exfatSpinner = ora(`[PS5] Mounting & validating exFAT: ${exf}...`).start();
+      try {
+        const { mountValidateAndExtractParam } = require('../services/osfmountService');
+        const { valid, metadata, message, skipped } = await mountValidateAndExtractParam(srcPath, (statusText) => {
+          exfatSpinner.text = `[PS5] ${statusText}`;
+        });
+
+        if (metadata) {
+          if (metadata.titleId && metadata.titleId !== 'Unknown') finalPpsa = metadata.titleId;
+          if (metadata.titleName && metadata.titleName !== 'Unknown') finalTitle = metadata.titleName;
+          if (metadata.version) finalVer = metadata.version;
+        }
+
+        if (!valid && !skipped) {
+          exfatSpinner.warn(`[PS5] exFAT chkdsk validation failed: ${message || 'errors found'}`);
+        } else if (skipped) {
+          exfatSpinner.info(`[PS5] Skipped exFAT mounting (OSFMount not installed).`);
+        } else {
+          exfatSpinner.succeed(`[PS5] exFAT mounted & validated clean (${finalTitle} [${finalPpsa}][${finalVer}])`);
+        }
+      } catch (err) {
+        exfatSpinner.fail(`[PS5] exFAT mount/validation failed: ${err.message}`);
       }
     }
 
@@ -317,34 +438,174 @@ async function processPendingArchivesPS5(downloadDir, pending = [], passwordOpti
 }
 
 /**
- * Parses a number-selection string like "3 5" or "1-4, 7" into a 0-based index Set.
+ * Fetches available PPSA codes for a pending game from its web URL.
  */
-function parseSelection(input, max) {
-  const picked = new Set();
-  for (const tok of input.split(/[\s,]+/).filter(Boolean)) {
-    const range = tok.match(/^(\d+)-(\d+)$/);
-    if (range) {
-      let a = parseInt(range[1], 10), b = parseInt(range[2], 10);
-      if (a > b) [a, b] = [b, a];
-      for (let n = a; n <= b; n++) if (n >= 1 && n <= max) picked.add(n - 1);
-    } else if (/^\d+$/.test(tok)) {
-      const n = parseInt(tok, 10);
-      if (n >= 1 && n <= max) picked.add(n - 1);
+async function getAvailablePpsasForPending(pendingEntry) {
+  if (!pendingEntry.url) return [];
+  try {
+    const { extractGameSections } = require('../services/webScraper');
+    const sections = await extractGameSections(pendingEntry.url);
+    if (!Array.isArray(sections)) return [];
+    const ppsaList = [];
+    const seen = new Set();
+    for (const sec of sections) {
+      if (sec.ppsa && !seen.has(sec.ppsa.toUpperCase())) {
+        seen.add(sec.ppsa.toUpperCase());
+        ppsaList.push({ ppsa: sec.ppsa.toUpperCase(), region: sec.region || 'Unknown' });
+      }
+    }
+    return ppsaList;
+  } catch (e) {
+    return [];
+  }
+}
+
+/**
+ * Parses user input for selecting entries with optional PPSA overrides or sub-PPSA selection.
+ * Examples: "1 2", "2:PPSA15646", "2 15646", "2.2", "1-3"
+ */
+function parseSelectionWithPpsa(input, rows, ppsaMap) {
+  const result = new Map(); // rowIndex -> customPpsa (or null if keep entry.ppsa)
+  if (!input) return result;
+
+  const tokens = input.split(/[\s,]+/).filter(Boolean);
+
+  for (let i = 0; i < tokens.length; i++) {
+    const tok = tokens[i];
+
+    // Pattern 1: "2:PPSA12345" or "2=PPSA12345" or "2:12345"
+    const explicitMatch = tok.match(/^(\d+)[:=](PPSA\d{5}|\d{5})$/i);
+    if (explicitMatch) {
+      const rowIdx = parseInt(explicitMatch[1], 10) - 1;
+      let ppsa = explicitMatch[2].toUpperCase();
+      if (/^\d{5}$/.test(ppsa)) ppsa = `PPSA${ppsa}`;
+      if (rowIdx >= 0 && rowIdx < rows.length) {
+        result.set(rowIdx, ppsa);
+      }
+      continue;
+    }
+
+    // Pattern 2: "2.1" or "2-1" where available PPSAs exist for row 2
+    const subMatch = tok.match(/^(\d+)[.-](\d+)$/);
+    if (subMatch) {
+      const rowIdx = parseInt(subMatch[1], 10) - 1;
+      const subIdx = parseInt(subMatch[2], 10) - 1;
+      if (rowIdx >= 0 && rowIdx < rows.length) {
+        const available = ppsaMap.get(rows[rowIdx].entry.normalizedTitle);
+        if (available && available[subIdx]) {
+          result.set(rowIdx, available[subIdx].ppsa);
+        } else {
+          // Range fallback e.g. "1-3"
+          let a = parseInt(subMatch[1], 10), b = parseInt(subMatch[2], 10);
+          if (a > b) [a, b] = [b, a];
+          for (let n = a; n <= b; n++) {
+            if (n >= 1 && n <= rows.length) result.set(n - 1, null);
+          }
+        }
+      }
+      continue;
+    }
+
+    // Pattern 3: "2" followed by "PPSA12345" or "12345" as next token
+    if (/^\d+$/.test(tok) && i + 1 < tokens.length && /^(PPSA\d{5}|\d{5})$/i.test(tokens[i + 1])) {
+      const rowIdx = parseInt(tok, 10) - 1;
+      let ppsa = tokens[i + 1].toUpperCase();
+      if (/^\d{5}$/.test(ppsa)) ppsa = `PPSA${ppsa}`;
+      if (rowIdx >= 0 && rowIdx < rows.length) {
+        result.set(rowIdx, ppsa);
+      }
+      i++; // skip next token
+      continue;
+    }
+
+    // Pattern 4: Simple number "1"
+    if (/^\d+$/.test(tok)) {
+      const rowIdx = parseInt(tok, 10) - 1;
+      if (rowIdx >= 0 && rowIdx < rows.length) {
+        if (!result.has(rowIdx)) result.set(rowIdx, null);
+      }
+      continue;
     }
   }
-  return picked;
+
+  return result;
 }
 
 /**
  * Batch-marks pending manual downloads (download -i) as completed.
- * Auto-detects which ones have their GAME file present, then lets the user add
- * any stragglers by number before committing.
+ * Auto-detects which ones have their GAME file present, lists available PPSAs,
+ * and allows user to pick entries or specify custom PPSAs before committing.
  */
-async function handlePending(options = {}) {
+async function handlePending(titleQuery = '', options = {}) {
   let pending = loadPending();
   if (pending.length === 0) {
     logger.info('No pending manual downloads. (Run `dlps download -l N -i` first.)');
     return;
+  }
+
+  // Parse and normalize PPSA if provided
+  let targetPpsa = null;
+  if (options.ppsa) {
+    const raw = String(options.ppsa).trim();
+    if (/^\d{5}$/.test(raw)) {
+      targetPpsa = `PPSA${raw}`;
+    } else {
+      targetPpsa = raw.toUpperCase();
+    }
+  }
+
+  // Filter or update pending queue based on targetPpsa or titleQuery
+  if (targetPpsa || titleQuery) {
+    const { normalizeTitle } = require('../utils/titleNormalizer');
+    const { savePending } = require('../services/pendingDb');
+    const queryNorm = titleQuery ? normalizeTitle(titleQuery) : '';
+
+    let matched = pending.filter(p => {
+      if (targetPpsa && p.ppsa && p.ppsa.toUpperCase() === targetPpsa) return true;
+      if (queryNorm && p.normalizedTitle && p.normalizedTitle.includes(queryNorm)) return true;
+      return false;
+    });
+
+    if (matched.length > 0) {
+      if (targetPpsa) {
+        let updated = false;
+        for (const item of matched) {
+          if (item.ppsa !== targetPpsa) {
+            item.ppsa = targetPpsa;
+            updated = true;
+          }
+        }
+        if (updated) {
+          savePending(pending);
+          logger.info(`Updated PPSA to ${targetPpsa} for matching pending entry.`);
+        }
+      }
+      pending = matched;
+    } else if (targetPpsa) {
+      let targetItem = null;
+      if (titleQuery) {
+        targetItem = pending.find(p => p.normalizedTitle && p.normalizedTitle.includes(normalizeTitle(titleQuery)));
+      }
+      if (!targetItem) {
+        targetItem = pending.find(p => !p.ppsa || p.ppsa === 'Unknown');
+      }
+      if (!targetItem && pending.length === 1) {
+        targetItem = pending[0];
+      }
+
+      if (targetItem) {
+        targetItem.ppsa = targetPpsa;
+        savePending(pending);
+        logger.info(`Assigned PPSA ${targetPpsa} to pending game: "${targetItem.title}"`);
+        pending = [targetItem];
+      } else {
+        logger.warn(`No pending games found matching PPSA: ${targetPpsa}`);
+        return;
+      }
+    } else if (titleQuery) {
+      logger.warn(`No pending games found matching title: "${titleQuery}"`);
+      return;
+    }
   }
 
   // For PS5 platform, post-process (rename/recompress) any matching archives
@@ -372,6 +633,16 @@ async function handlePending(options = {}) {
     return;
   }
 
+  // Fetch available PPSAs for pending items from web pages (if available)
+  const ppsaMap = new Map();
+  const fetchPromises = pending.map(async p => {
+    const list = await getAvailablePpsasForPending(p);
+    if (list.length > 0) {
+      ppsaMap.set(p.normalizedTitle, list);
+    }
+  });
+  await Promise.allSettled(fetchPromises);
+
   const names = listDownloadDirNames();
   const rows = pending.map(p => ({
     entry: p,
@@ -384,6 +655,12 @@ async function handlePending(options = {}) {
     const ppsa = chalk.gray(`[${r.entry.ppsa}]`);
     const found = r.file ? chalk.green(' (file found)') : '';
     console.log(`  ${mark} [${String(idx + 1).padStart(2, '0')}] ${r.entry.title} ${ppsa}${found}`);
+
+    const available = ppsaMap.get(r.entry.normalizedTitle);
+    if (available && available.length > 0) {
+      const subList = available.map((item, subIdx) => `[${subIdx + 1}] ${item.ppsa} (${item.region})`).join('  ');
+      console.log(chalk.gray(`      └─ Available PPSAs: ${subList}`));
+    }
   });
 
   const detectedCount = rows.filter(r => r.file).length;
@@ -394,32 +671,41 @@ async function handlePending(options = {}) {
   const answer = await new Promise(resolve => {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
     rl.question(
-      chalk.cyan('Add any extra numbers to mark completed (e.g. "3 5"), or press Enter to confirm: '),
+      chalk.cyan('Add extra numbers to mark completed (e.g. "3", "2:PPSA15646", or "2.2"), or press Enter to confirm: '),
       ans => { rl.close(); resolve(ans.trim()); }
     );
   });
 
-  const selected = new Set(rows.map((r, i) => (r.file ? i : -1)).filter(i => i >= 0));
-  for (const i of parseSelection(answer, rows.length)) selected.add(i);
+  const selectedMap = new Map(); // rowIndex -> customPpsa
+  rows.forEach((r, i) => {
+    if (r.file || ((targetPpsa || titleQuery) && rows.length === 1)) {
+      selectedMap.set(i, targetPpsa || r.entry.ppsa || 'Unknown');
+    }
+  });
 
-  if (selected.size === 0) {
+  const userSelections = parseSelectionWithPpsa(answer, rows, ppsaMap);
+  for (const [rIdx, customPpsa] of userSelections.entries()) {
+    selectedMap.set(rIdx, customPpsa || targetPpsa || rows[rIdx].entry.ppsa || 'Unknown');
+  }
+
+  if (selectedMap.size === 0) {
     logger.info('Nothing selected. No changes made.');
     return;
   }
 
   const doneTitles = [];
-  for (const i of selected) {
+  for (const [i, finalPpsa] of selectedMap.entries()) {
     const { entry, file } = rows[i];
     addDownloadedGame({
       title: entry.title,
       fileName: file ? file : 'Manual Entry',
-      ppsa: entry.ppsa || 'Unknown',
+      ppsa: finalPpsa || entry.ppsa || 'Unknown',
       password: '',
       source: 'Manual',
       region: 'Unknown',
     });
     doneTitles.push(entry.normalizedTitle);
-    logger.success(`Marked completed: "${entry.title}" (${entry.ppsa})`);
+    logger.success(`Marked completed: "${entry.title}" (${finalPpsa})`);
   }
 
   removePending(doneTitles);
@@ -436,7 +722,7 @@ async function completedCommand(titleQuery, options = {}) {
 
   // Batch-complete games queued for manual download via `download -i`.
   if (options.pending) {
-    return handlePending(options);
+    return handlePending(titleQuery, options);
   }
 
   // If no query is provided, print the list of currently completed games

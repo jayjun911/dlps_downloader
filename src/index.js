@@ -65,6 +65,7 @@ program
   .option('-r, --remove', 'Remove the game from the completed list')
   .option('--pending', 'Batch-mark games queued by `download -i` as completed (auto-detects downloaded GAME files)')
   .option('-p, --password <string>', 'Archive password (if needed)')
+  .option('--ppsa <ppsa>', 'Specify PPSA ID to filter or update pending game(s)')
   .description('Manage completed games list (add, remove, or list completed games)')
   .action((title, options) => {
     completedCommand(title, options);

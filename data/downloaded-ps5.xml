@@ -3618,4 +3618,67 @@
     <Source>Manual</Source>
     <Region>Unknown</Region>
   </Game>
+  <Game>
+    <Title>Like A Dragon Gaiden The Man Who Erased His Name</Title>
+    <FileName>Manual Entry</FileName>
+    <PPSA>Unknown</PPSA>
+    <Password></Password>
+    <DownloadedAt>2026-07-27T14:19:49.642Z</DownloadedAt>
+    <Source>Manual</Source>
+    <Region>Unknown</Region>
+  </Game>
+  <Game>
+    <Title>Like A Dragon Pirate Yakuza in Hawaii</Title>
+    <FileName>Manual Entry</FileName>
+    <PPSA>Unknown</PPSA>
+    <Password></Password>
+    <DownloadedAt>2026-07-27T14:20:05.625Z</DownloadedAt>
+    <Source>Manual</Source>
+    <Region>Unknown</Region>
+  </Game>
+  <Game>
+    <Title>FIFA 21</Title>
+    <FileName>Manual Entry</FileName>
+    <PPSA>Unknown</PPSA>
+    <Password></Password>
+    <DownloadedAt>2026-07-27T14:20:19.915Z</DownloadedAt>
+    <Source>Manual</Source>
+    <Region>Unknown</Region>
+  </Game>
+  <Game>
+    <Title>EA Sports UFC 5</Title>
+    <FileName>Manual Entry</FileName>
+    <PPSA>Unknown</PPSA>
+    <Password></Password>
+    <DownloadedAt>2026-07-27T14:20:51.800Z</DownloadedAt>
+    <Source>Manual</Source>
+    <Region>Unknown</Region>
+  </Game>
+  <Game>
+    <Title>Castlevania Dominus Collection</Title>
+    <FileName>castlevania dominus collection [ppsa15645][v01.003] [game].exfat</FileName>
+    <PPSA>PPSA15645</PPSA>
+    <Password></Password>
+    <DownloadedAt>2026-07-28T01:38:33.215Z</DownloadedAt>
+    <Source>Manual</Source>
+    <Region>Unknown</Region>
+  </Game>
+  <Game>
+    <Title>Mega Man Star Force Legacy Collection</Title>
+    <FileName>mega man star force legacy collection [ppsa32239][v01.001] [game].7z</FileName>
+    <PPSA>PPSA32239</PPSA>
+    <Password></Password>
+    <DownloadedAt>2026-07-28T02:58:35.233Z</DownloadedAt>
+    <Source>Manual</Source>
+    <Region>Unknown</Region>
+  </Game>
+  <Game>
+    <Title>NBA 2K23</Title>
+    <FileName>Manual Entry</FileName>
+    <PPSA>PPSA01416</PPSA>
+    <Password></Password>
+    <DownloadedAt>2026-07-28T02:59:26.430Z</DownloadedAt>
+    <Source>Manual</Source>
+    <Region>Unknown</Region>
+  </Game>
 </Downloaded>

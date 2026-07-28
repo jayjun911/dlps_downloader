@@ -161,12 +161,14 @@ function findParamPathInArchive(bz, archivePath, pwd) {
 /**
  * Extracts param.json from an archive and parses game metadata.
  */
-async function getGameInfoFromArchive(rarFilePath, password) {
+async function getGameInfoFromArchive(rarFilePath, password, onProgress) {
   const bz = requireBz();
   const tempDir = path.join(BIN_DIR, 'temp_param_' + Date.now());
   fs.mkdirSync(tempDir, { recursive: true });
 
   const candidates = buildCandidates(password);
+
+  if (onProgress) onProgress('Reading archive file list...');
 
   // Step 1: find param.json's exact internal path via listing
   let paramInternalPath = findParamPathInArchive(bz, rarFilePath, '');
@@ -177,6 +179,7 @@ async function getGameInfoFromArchive(rarFilePath, password) {
     // Listing failed — archive may be encrypted; try each password candidate
     encryptedFlag = true;
     for (const cand of candidates) {
+      if (onProgress) onProgress(`Testing password: "${cand}"`);
       paramInternalPath = findParamPathInArchive(bz, rarFilePath, cand);
       if (paramInternalPath) {
         workingPassword = cand;
@@ -193,6 +196,8 @@ async function getGameInfoFromArchive(rarFilePath, password) {
   const testCandidates = encryptedFlag ? (workingPassword ? [workingPassword] : candidates) : ['', ...candidates];
 
   let success = false;
+
+  if (onProgress) onProgress('Extracting param.json...');
 
   outer:
   for (const cand of testCandidates) {
@@ -255,19 +260,21 @@ async function getGameInfoFromArchive(rarFilePath, password) {
  * Finds the working password for an archive.
  * Returns empty string if the archive is not encrypted or no password works.
  */
-async function findWorkingPassword(rarFilePath, passwordCandidates = []) {
+async function findWorkingPassword(rarFilePath, passwordCandidates = [], onProgress) {
   const bz = requireBz();
   const candidates = buildCandidates(passwordCandidates[0] || '');
   for (const c of passwordCandidates.slice(1)) {
     if (!candidates.includes(c)) candidates.unshift(c);
   }
 
+  if (onProgress) onProgress('Testing archive integrity (no password)...');
   try {
     execSync(`"${bz}" t -y "${rarFilePath}"`, { stdio: 'ignore' });
     return '';
   } catch (e) {}
 
   for (const cand of candidates) {
+    if (onProgress) onProgress(`Testing password: "${cand}"`);
     try {
       execSync(`"${bz}" t -y -p:${cand} "${rarFilePath}"`, { stdio: 'ignore' });
       return cand;
@@ -386,5 +393,6 @@ module.exports = {
   compressFileTo7z,
   findShallowestEbootDir,
   findWorkingPassword,
+  findParamJson,
   sanitizeFileName
 };

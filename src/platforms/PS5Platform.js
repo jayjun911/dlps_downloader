@@ -132,7 +132,9 @@ class PS5Platform extends BasePlatform {
         const mainFilePath = path.join(downloadDir, findMainArchiveFile(gameArchives));
         const checkSpinner = ora(`Inspecting "${path.basename(mainFilePath)}" internally...`).start();
         try {
-          const gameInfo = await getGameInfoFromArchive(mainFilePath, password);
+          const gameInfo = await getGameInfoFromArchive(mainFilePath, password, (statusText) => {
+            checkSpinner.text = `Inspecting "${path.basename(mainFilePath)}" - ${statusText}`;
+          });
           finalPpsa  = gameInfo.titleId;
           finalVer   = gameInfo.version;
           finalTitle = gameInfo.titleName;

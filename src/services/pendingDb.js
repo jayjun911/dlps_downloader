@@ -75,6 +75,7 @@ function clearPending() {
 
 module.exports = {
   loadPending,
+  savePending,
   addPending,
   removePending,
   clearPending,
