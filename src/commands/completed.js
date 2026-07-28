@@ -233,6 +233,10 @@ async function processPendingArchivesPS5(downloadDir, pending = [], passwordOpti
       try { return !fs.statSync(path.join(downloadDir, f)).isDirectory(); } catch (e) { return false; }
     });
 
+    const exfatFiles = matchedFiles.filter(f => f.toLowerCase().endsWith('.exfat'));
+    const ffpkgFiles = matchedFiles.filter(f => f.toLowerCase().endsWith('.ffpkg'));
+    const archiveFiles = matchedFiles.filter(isArchiveFile);
+
     let finalTitle = pendingEntry.title;
     let finalPpsa = ppsaKey;
     let finalVer = 'v01.00';
