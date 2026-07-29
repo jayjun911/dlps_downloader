@@ -158,12 +158,17 @@ function findParamPathInArchive(bz, archivePath, pwd) {
   return null;
 }
 
+function getDownloadDir() {
+  return process.env.DOWNLOAD_DIR || path.join(__dirname, '../../downloads');
+}
+
 /**
  * Extracts param.json from an archive and parses game metadata.
  */
 async function getGameInfoFromArchive(rarFilePath, password, onProgress) {
   const bz = requireBz();
-  const tempDir = path.join(BIN_DIR, 'temp_param_' + Date.now());
+  const downloadDir = getDownloadDir();
+  const tempDir = path.join(downloadDir, 'temp_param_' + Date.now());
   fs.mkdirSync(tempDir, { recursive: true });
 
   const candidates = buildCandidates(password);
@@ -262,23 +267,60 @@ async function getGameInfoFromArchive(rarFilePath, password, onProgress) {
  */
 async function findWorkingPassword(rarFilePath, passwordCandidates = [], onProgress) {
   const bz = requireBz();
+  const logger = require('../utils/logger');
+  
   const candidates = buildCandidates(passwordCandidates[0] || '');
   for (const c of passwordCandidates.slice(1)) {
     if (!candidates.includes(c)) candidates.unshift(c);
   }
 
-  if (onProgress) onProgress('Testing archive integrity (no password)...');
-  try {
-    execSync(`"${bz}" t -y "${rarFilePath}"`, { stdio: 'ignore' });
-    return '';
-  } catch (e) {}
+  const testFast = (pwd) => {
+    const pwdFlag = pwd ? `-p:${pwd}` : '';
+    try {
+      // 1. Test header decryption / list files
+      const output = execSync(
+        `"${bz}" l ${pwdFlag} "${rarFilePath}"`,
+        { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'], maxBuffer: 1024 * 1024 * 10 }
+      );
+      
+      const rowRe = /^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\s+(\S+)\s+\d+\s+\d+\s+(.+)$/;
+      let firstFile = null;
+      for (const line of output.split(/\r?\n/)) {
+        const m = line.match(rowRe);
+        if (m && !m[1].toUpperCase().includes('D')) {
+          firstFile = m[2].trim();
+          break;
+        }
+      }
+      
+      if (!firstFile) {
+        return true; // No files to test, but header succeeded
+      }
+      
+      // 2. Test data decryption on a SINGLE file
+      try {
+        execSync(`"${bz}" t -y ${pwdFlag} "${rarFilePath}" "${firstFile}"`, { stdio: 'ignore' });
+        return true; // Success
+      } catch (e) {
+        return false; // Data decryption failed
+      }
+    } catch (e) {
+      return false; // Header decryption failed
+    }
+  };
+
+  const initialMsg = 'Checking archive encryption (Fast Mode)...';
+  if (onProgress) onProgress(initialMsg);
+  logger.info(`[Bandizip] ${initialMsg}`);
+  
+  if (testFast('')) return '';
 
   for (const cand of candidates) {
-    if (onProgress) onProgress(`Testing password: "${cand}"`);
-    try {
-      execSync(`"${bz}" t -y -p:${cand} "${rarFilePath}"`, { stdio: 'ignore' });
-      return cand;
-    } catch (e) { /* try next */ }
+    const msg = `Testing password: "${cand}"`;
+    if (onProgress) onProgress(msg);
+    logger.info(`[Bandizip] ${msg}`);
+    
+    if (testFast(cand)) return cand;
   }
 
   return '';
@@ -394,5 +436,6 @@ module.exports = {
   findShallowestEbootDir,
   findWorkingPassword,
   findParamJson,
-  sanitizeFileName
+  sanitizeFileName,
+  buildCandidates
 };

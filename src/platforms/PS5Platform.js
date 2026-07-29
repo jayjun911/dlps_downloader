@@ -470,7 +470,7 @@ class PS5Platform extends BasePlatform {
     const realTitle = (metadata && metadata.titleName) || initialTitle;
     const realPpsa  = (metadata && metadata.titleId)   || initialPpsa;
     const realVer   = (metadata && metadata.version)   || initialVer;
-    const baseName  = `${sanitizeFileName(realTitle)} [${realPpsa}][${realVer}]`;
+    const baseName  = `${sanitizeFileName(realTitle)} [${realPpsa}][${realVer}][${type}]`;
 
     let registeredFile;
     if (encrypted) {
@@ -533,7 +533,7 @@ class PS5Platform extends BasePlatform {
     const realTitle = (metadata && metadata.titleName) || initialTitle;
     const realPpsa  = (metadata && metadata.titleId)   || initialPpsa;
     const realVer   = (metadata && metadata.version)   || initialVer;
-    const baseName  = `${sanitizeFileName(realTitle)} [${realPpsa}][${realVer}]`;
+    const baseName  = `${sanitizeFileName(realTitle)} [${realPpsa}][${realVer}][${type}]`;
     const renamedPath = getUniqueFilePath(downloadDir, baseName, '.exfat', currentPath);
     try {
       if (path.resolve(currentPath) !== path.resolve(renamedPath)) fs.renameSync(currentPath, renamedPath);

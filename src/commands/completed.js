@@ -143,9 +143,11 @@ async function processPendingArchivesPS5(downloadDir, pending = [], passwordOpti
   if (getCurrentPlatformKey() !== 'ps5') return;
 
   const ora = require('ora');
+  const path = require('path');
+  const fs = require('fs');
+
   const {
     extractRarArchive,
-    getGameInfoFromArchive,
     compressFolderTo7z,
     findShallowestEbootDir,
     findWorkingPassword,
@@ -155,13 +157,16 @@ async function processPendingArchivesPS5(downloadDir, pending = [], passwordOpti
 
   const {
     isArchiveFile,
-    checkIsSplitArchive,
     findMainArchiveFile,
-    getUniqueFilePath
+    getUniqueFilePath,
+    checkIsSplitArchive
   } = require('../utils/postProcessor');
 
   const { extractPPSA } = require('../utils/ppsaParser');
   const { normalizeTitle } = require('../utils/titleNormalizer');
+  const { deriveVersionFromParam, deriveTitleNameFromParam } = require('../utils/versionParser');
+  const { mountValidateAndExtractParam } = require('../services/osfmountService');
+  const { readFfpkgParam } = require('../services/ufs2Reader');
 
   if (!fs.existsSync(downloadDir)) return;
 
@@ -172,8 +177,6 @@ async function processPendingArchivesPS5(downloadDir, pending = [], passwordOpti
     return;
   }
 
-  // Only process files that belong to pending entries.
-  // For each pending entry, find matching files by PPSA or title.
   const pendingWithPpsa = pending.filter(p => p.ppsa && p.ppsa !== 'Unknown');
   if (pendingWithPpsa.length === 0) return;
 
@@ -183,15 +186,15 @@ async function processPendingArchivesPS5(downloadDir, pending = [], passwordOpti
     const ppsaKey = pendingEntry.ppsa.toUpperCase();
     const normPendingTitle = normalizeTitle(pendingEntry.title);
 
-    // Find files and folders matching this pending entry's PPSA or title
+    // Filter items in DOWNLOAD_DIR matching the PPSA or title
     const matchedItems = dirFiles.filter(item => {
+      if (item.startsWith('.')) return false;
+      
       const fullPath = path.join(downloadDir, item);
       let isDir = false;
       try { isDir = fs.statSync(fullPath).isDirectory(); } catch (e) {}
 
       if (isDir) {
-        if (item.startsWith('.')) return false;
-
         const itemPpsa = extractPPSA(item);
         if (itemPpsa && itemPpsa.toUpperCase() === ppsaKey) return true;
 
@@ -200,9 +203,7 @@ async function processPendingArchivesPS5(downloadDir, pending = [], passwordOpti
           try {
             const rawParam = fs.readFileSync(paramFile, 'utf-8');
             const parsedParam = JSON.parse(rawParam);
-            if (parsedParam.titleId && parsedParam.titleId.toUpperCase() === ppsaKey) {
-              return true;
-            }
+            if (parsedParam.titleId && parsedParam.titleId.toUpperCase() === ppsaKey) return true;
           } catch (e) {}
         }
 
@@ -233,16 +234,16 @@ async function processPendingArchivesPS5(downloadDir, pending = [], passwordOpti
       try { return !fs.statSync(path.join(downloadDir, f)).isDirectory(); } catch (e) { return false; }
     });
 
-    const exfatFiles = matchedFiles.filter(f => f.toLowerCase().endsWith('.exfat'));
-    const ffpkgFiles = matchedFiles.filter(f => f.toLowerCase().endsWith('.ffpkg'));
     const archiveFiles = matchedFiles.filter(isArchiveFile);
 
+    // Base default metadata
     let finalTitle = pendingEntry.title;
     let finalPpsa = ppsaKey;
     let finalVer = 'v01.00';
-    let workingPassword = passwordOption || '';
 
-    // Process matching uncompressed folders
+    // ==========================================
+    // A-a: Process Uncompressed Folders
+    // ==========================================
     for (const folderName of matchedFolders) {
       const folderPath = path.join(downloadDir, folderName);
       let folderTitle = finalTitle;
@@ -254,7 +255,6 @@ async function processPendingArchivesPS5(downloadDir, pending = [], passwordOpti
         try {
           const rawParam = fs.readFileSync(paramPath, 'utf-8');
           const parsedParam = JSON.parse(rawParam);
-          const { deriveVersionFromParam, deriveTitleNameFromParam } = require('../utils/versionParser');
           if (parsedParam.titleId && parsedParam.titleId !== 'Unknown') folderPpsa = parsedParam.titleId;
           const parsedTitle = deriveTitleNameFromParam(parsedParam);
           if (parsedTitle) folderTitle = sanitizeFileName(parsedTitle);
@@ -262,176 +262,264 @@ async function processPendingArchivesPS5(downloadDir, pending = [], passwordOpti
         } catch (e) {}
       }
 
-      const folderBaseNameLabel = `${sanitizeFileName(folderTitle)} [${folderPpsa}][${folderVer}] [Game]`;
+      logger.info(`[PS5] Found folder: ${folderName} -> ${folderTitle} [${folderPpsa}]`);
+
+      const folderBaseNameLabel = `${sanitizeFileName(folderTitle)} [${folderPpsa}][${folderVer}][Game]`;
       const dest7zPath = getUniqueFilePath(downloadDir, folderBaseNameLabel, '.7z');
+      const compressingPath = `${dest7zPath}.compressing`;
       const compressRoot = findShallowestEbootDir(folderPath) || folderPath;
 
-      logger.info(`[PS5] Found matching uncompressed folder "${folderName}" for ${folderPpsa}`);
-      const compressSpinner = ora(`[PS5] Compressing folder to ${path.basename(dest7zPath)}...`).start();
+      const compressSpinner = ora(`[PS5] Compressing folder to 7z...`).start();
 
       try {
-        await compressFolderTo7z(compressRoot, dest7zPath, (text) => {
+        await compressFolderTo7z(compressRoot, compressingPath, (text) => {
           compressSpinner.text = `[PS5] [Compressing] ${folderPpsa} - ${text}`;
         });
 
-        if (!fs.existsSync(dest7zPath) || fs.statSync(dest7zPath).size === 0) {
-          throw new Error(`Compressed 7z is empty: ${dest7zPath}`);
+        if (!fs.existsSync(compressingPath) || fs.statSync(compressingPath).size === 0) {
+          throw new Error(`Compressed 7z is empty: ${compressingPath}`);
         }
 
-        try {
-          fs.rmSync(folderPath, { recursive: true, force: true });
-        } catch (rmErr) {
-          logger.warn(`[PS5] Could not remove original folder: ${rmErr.message}`);
-        }
+        fs.renameSync(compressingPath, dest7zPath);
 
-        compressSpinner.succeed(`[PS5] Processed and compressed folder to: ${path.basename(dest7zPath)}`);
+        try { fs.rmSync(folderPath, { recursive: true, force: true }); } catch (rmErr) {}
+
+        compressSpinner.succeed(`[PS5] Compressed folder to: ${path.basename(dest7zPath)}`);
         processedCount++;
         finalTitle = folderTitle;
         finalPpsa = folderPpsa;
         finalVer = folderVer;
       } catch (err) {
         compressSpinner.fail(`[PS5] Folder compression failed for ${folderName}: ${err.message}`);
+        try { if (fs.existsSync(compressingPath)) fs.unlinkSync(compressingPath); } catch (e) {}
       }
     }
 
-    const mainFileName = findMainArchiveFile(matchedFiles) || matchedFiles[0];
+    // ==========================================
+    // A-b / A-c: Process Archives
+    // ==========================================
+    const mainFileName = findMainArchiveFile(archiveFiles) || archiveFiles[0];
     const mainFilePath = mainFileName ? path.join(downloadDir, mainFileName) : null;
 
-    // Try to read internal metadata from archive
-    if (mainFilePath && isArchiveFile(mainFileName)) {
-      const inspectSpinner = ora(`[PS5] Inspecting archive metadata (${ppsaKey})...`).start();
+    if (mainFilePath) {
+      const isSplit = checkIsSplitArchive(archiveFiles) || archiveFiles.length > 1;
+
+      let fastMetadataSucceeded = false;
+      let workingPassword = '';
+      const inspectSpinner = ora(`[PS5] Inspecting archive metadata (${mainFileName})...`).start();
+      
       try {
+        const { getGameInfoFromArchive } = require('../services/unrarService');
         const gameInfo = await getGameInfoFromArchive(mainFilePath, passwordOption, (statusText) => {
-          inspectSpinner.text = `[PS5] Inspecting archive metadata (${ppsaKey}) - ${statusText}`;
+          inspectSpinner.text = `[PS5] ${statusText}`;
         });
         if (gameInfo.titleId && gameInfo.titleId !== 'Unknown') finalPpsa = gameInfo.titleId;
         if (gameInfo.titleName && gameInfo.titleName !== 'Unknown') finalTitle = gameInfo.titleName;
         if (gameInfo.version) finalVer = gameInfo.version;
-        if (gameInfo.workingPassword) workingPassword = gameInfo.workingPassword;
-        inspectSpinner.succeed(`[PS5] Read archive metadata (${ppsaKey}): ${finalTitle} [${finalVer}]`);
+        workingPassword = gameInfo.workingPassword || '';
+        fastMetadataSucceeded = true;
+        inspectSpinner.succeed(`[PS5] Read metadata fast: ${finalTitle} [${finalVer}]`);
       } catch (e) {
-        inspectSpinner.text = `[PS5] Searching password for ${ppsaKey}...`;
-        try {
-          const foundPwd = await findWorkingPassword(mainFilePath, passwordOption ? [passwordOption] : [], (statusText) => {
-            inspectSpinner.text = `[PS5] Searching password (${ppsaKey}) - ${statusText}`;
-          });
-          if (foundPwd) workingPassword = foundPwd;
-          inspectSpinner.stop();
-        } catch (pwdErr) {
-          inspectSpinner.stop();
+        inspectSpinner.info(`[PS5] Fast metadata extraction failed (likely exfat/ffpkg). Will extract fully.`);
+      }
+
+      if (fastMetadataSucceeded && workingPassword === '' && !isSplit) {
+        // A-b-2-1: Unencrypted single folder! No need to extract fully.
+        const updatedBaseNameLabel = `${sanitizeFileName(finalTitle)} [${finalPpsa}][${finalVer}][Game]`;
+        const ext = path.extname(mainFilePath);
+        const destPath = path.join(downloadDir, `${updatedBaseNameLabel}${ext}`);
+        if (mainFilePath !== destPath) {
+          try { fs.renameSync(mainFilePath, destPath); } catch (e) {}
+          logger.success(`[PS5] Renamed archive: ${path.basename(destPath)}`);
         }
+        processedCount++;
+        continue; // Move to next
       }
-    }
 
-    // Mount and validate exfat files via OSFMount
-    for (const exf of exfatFiles) {
-      const srcPath = path.join(downloadDir, exf);
-      const exfatSpinner = ora(`[PS5] Mounting & validating exFAT: ${exf}...`).start();
-      try {
-        const { mountValidateAndExtractParam } = require('../services/osfmountService');
-        const { valid, metadata, message, skipped } = await mountValidateAndExtractParam(srcPath, (statusText) => {
-          exfatSpinner.text = `[PS5] ${statusText}`;
-        });
+      // Full extraction is required for Encrypted, Split, or Exfat/Ffpkg inner files.
+      const processSpinner = ora(`[PS5] Processing archive (${mainFileName})...`).start();
+      
+      const { buildCandidates } = require('../services/unrarService');
+      const candidates = workingPassword ? [workingPassword] : buildCandidates(passwordOption || '');
+      if (!candidates.includes('')) candidates.unshift('');
 
-        if (metadata) {
-          if (metadata.titleId && metadata.titleId !== 'Unknown') finalPpsa = metadata.titleId;
-          if (metadata.titleName && metadata.titleName !== 'Unknown') finalTitle = metadata.titleName;
-          if (metadata.version) finalVer = metadata.version;
-        }
+      const outputFolderPath = path.join(downloadDir, `temp_extract_${ppsaKey}_${Date.now()}`);
+      let extractSuccess = false;
 
-        if (!valid && !skipped) {
-          exfatSpinner.warn(`[PS5] exFAT chkdsk validation failed: ${message || 'errors found'}`);
-        } else if (skipped) {
-          exfatSpinner.info(`[PS5] Skipped exFAT mounting (OSFMount not installed).`);
-        } else {
-          exfatSpinner.succeed(`[PS5] exFAT mounted & validated clean (${finalTitle} [${finalPpsa}][${finalVer}])`);
-        }
-      } catch (err) {
-        exfatSpinner.fail(`[PS5] exFAT mount/validation failed: ${err.message}`);
-      }
-    }
-
-    const baseNameLabel = `${sanitizeFileName(finalTitle)} [${finalPpsa}][${finalVer}] [Game]`;
-    processedCount++;
-
-    // Rename exfat files
-    for (const exf of exfatFiles) {
-      const srcPath = path.join(downloadDir, exf);
-      const destPath = path.join(downloadDir, `${baseNameLabel}.exfat`);
-      if (srcPath !== destPath && !fs.existsSync(destPath)) {
+      for (const cand of candidates) {
+        processSpinner.text = `[PS5] Extracting with password: "${cand || 'None'}"...`;
+        logger.info(`[PS5] Extracting with password: "${cand || 'None'}"`);
         try {
-          fs.renameSync(srcPath, destPath);
-          logger.success(`[PS5] Renamed exfat: ${path.basename(destPath)}`);
-        } catch (e) {}
-      }
-    }
-
-    // Rename ffpkg files
-    for (const ff of ffpkgFiles) {
-      const srcPath = path.join(downloadDir, ff);
-      const destPath = path.join(downloadDir, `${baseNameLabel}.ffpkg`);
-      if (srcPath !== destPath && !fs.existsSync(destPath)) {
-        try {
-          fs.renameSync(srcPath, destPath);
-          logger.success(`[PS5] Renamed ffpkg: ${path.basename(destPath)}`);
-        } catch (e) {}
-      }
-    }
-
-    // Process archives (rar, split, encrypted, single 7z)
-    if (archiveFiles.length > 0 && mainFileName) {
-      const isSplit = checkIsSplitArchive(archiveFiles) || archiveFiles.length > 1;
-      const isEncrypted = workingPassword !== '';
-      const isRar = archiveFiles.some(f => f.toLowerCase().includes('.rar') || /\.r\d{2}$/i.test(f));
-      const isNotSingle7z = isRar || isSplit || isEncrypted || !mainFileName.toLowerCase().endsWith('.7z');
-
-      if (isNotSingle7z) {
-        logger.info(`[PS5] Found matching ${ppsaKey}, ${finalTitle}`);
-        const processSpinner = ora(`[PS5] Extracting & recompressing ${ppsaKey} (${archiveFiles.length} file(s))...`).start();
-        const outputFolderPath = path.join(downloadDir, `temp_extract_${ppsaKey}_${Date.now()}`);
-
-        try {
-          await extractRarArchive(mainFilePath, outputFolderPath, workingPassword, (text) => {
+          await extractRarArchive(mainFilePath, outputFolderPath, cand, (text) => {
             processSpinner.text = `[PS5] [Extracting] ${ppsaKey} - ${text}`;
           });
 
           if (!fs.existsSync(outputFolderPath) || fs.readdirSync(outputFolderPath).length === 0) {
-            throw new Error(`Extraction output folder is empty: ${outputFolderPath}`);
+            throw new Error(`Extraction output folder is empty.`);
           }
 
-          for (const file of archiveFiles) {
-            try { fs.unlinkSync(path.join(downloadDir, file)); } catch (unlinkErr) {}
-          }
-
-          const dest7zPath = getUniqueFilePath(downloadDir, baseNameLabel, '.7z');
-          const compressRoot = findShallowestEbootDir(outputFolderPath) || outputFolderPath;
-
-          await compressFolderTo7z(compressRoot, dest7zPath, (text) => {
-            processSpinner.text = `[PS5] [Compressing] ${ppsaKey} - ${text}`;
-          });
-
-          if (!fs.existsSync(dest7zPath) || fs.statSync(dest7zPath).size === 0) {
-            throw new Error(`Recompressed 7z is empty: ${dest7zPath}`);
-          }
-
-          try { fs.rmSync(outputFolderPath, { recursive: true, force: true }); } catch (rmErr) {}
-
-          processSpinner.succeed(`[PS5] Processed and recompressed to: ${path.basename(dest7zPath)}`);
+          extractSuccess = true;
+          workingPassword = cand;
+          break;
         } catch (err) {
-          processSpinner.fail(`[PS5] Processing failed for ${ppsaKey}: ${err.message}`);
-          try { if (fs.existsSync(outputFolderPath)) fs.rmSync(outputFolderPath, { recursive: true, force: true }); } catch (e) {}
+          try { fs.rmSync(outputFolderPath, { recursive: true, force: true }); } catch (e) {}
         }
-      } else {
-        // Single unencrypted .7z — just rename
-        const dest7zPath = path.join(downloadDir, `${baseNameLabel}.7z`);
-        if (mainFilePath !== dest7zPath && !fs.existsSync(dest7zPath)) {
-          try {
-            fs.renameSync(mainFilePath, dest7zPath);
-            logger.success(`[PS5] Renamed archive: ${path.basename(dest7zPath)}`);
-          } catch (renameErr) {
-            logger.warn(`[PS5] Could not rename archive: ${renameErr.message}`);
+      }
+
+      if (!extractSuccess) {
+        processSpinner.fail(`[PS5] Archive extraction failed for ${ppsaKey}: All passwords failed or archive is corrupted.`);
+        continue;
+      }
+
+      let tempTitle = finalTitle;
+      let tempPpsa = finalPpsa;
+      let tempVer = finalVer;
+      let targetForCompression = outputFolderPath;
+
+      try {
+        const findExfatInFolder = (dir) => {
+          if (!fs.existsSync(dir)) return null;
+          for (const file of fs.readdirSync(dir)) {
+            const fullPath = path.join(dir, file);
+            let isDir = false;
+            try { isDir = fs.statSync(fullPath).isDirectory(); } catch (e) {}
+            if (isDir) {
+              const found = findExfatInFolder(fullPath);
+              if (found) return found;
+            } else if (file.toLowerCase().endsWith('.exfat')) {
+              return fullPath;
+            }
           }
+          return null;
+        };
+
+        const findFfpkgInFolder = (dir) => {
+          if (!fs.existsSync(dir)) return null;
+          for (const file of fs.readdirSync(dir)) {
+            const fullPath = path.join(dir, file);
+            let isDir = false;
+            try { isDir = fs.statSync(fullPath).isDirectory(); } catch (e) {}
+            if (isDir) {
+              const found = findFfpkgInFolder(fullPath);
+              if (found) return found;
+            } else if (file.toLowerCase().endsWith('.ffpkg')) {
+              return fullPath;
+            }
+          }
+          return null;
+        };
+
+        const extractedExfatPath = findExfatInFolder(outputFolderPath);
+        const extractedFfpkgPath = findFfpkgInFolder(outputFolderPath);
+        const paramPath = findParamJson(outputFolderPath);
+
+        if (extractedExfatPath) {
+          processSpinner.text = `[PS5] Mounting extracted exFAT for validation and metadata...`;
+          const result = await mountValidateAndExtractParam(extractedExfatPath, (s) => {
+            processSpinner.text = `[PS5] ${s}`;
+          });
+          
+          if (result.metadata) {
+            if (result.metadata.titleId && result.metadata.titleId !== 'Unknown') tempPpsa = result.metadata.titleId;
+            if (result.metadata.titleName && result.metadata.titleName !== 'Unknown') tempTitle = result.metadata.titleName;
+            if (result.metadata.version) tempVer = result.metadata.version;
+          }
+
+          if (result.skipped) {
+            logger.warn(`[PS5] OSFMount not available — skipped exFAT validation`);
+          } else if (!result.valid) {
+            logger.warn(`[PS5] exFAT chkdsk validation failed: ${result.message}`);
+          } else {
+            logger.success(`[PS5] exFAT Mounted & Validated — ${tempTitle} [${tempPpsa}][${tempVer}]`);
+          }
+
+          const updatedExfatName = `${sanitizeFileName(tempTitle)} [${tempPpsa}][${tempVer}][Game].exfat`;
+          const renamedExfatPath = path.join(path.dirname(extractedExfatPath), updatedExfatName);
+          if (path.resolve(extractedExfatPath) !== path.resolve(renamedExfatPath)) {
+            try { fs.renameSync(extractedExfatPath, renamedExfatPath); } catch (e) {}
+          }
+        } else if (extractedFfpkgPath) {
+          processSpinner.text = `[PS5] Parsing ffpkg for metadata...`;
+          const result = readFfpkgParam(extractedFfpkgPath);
+          if (result.metadata) {
+            if (result.metadata.titleId && result.metadata.titleId !== 'Unknown') tempPpsa = result.metadata.titleId;
+            if (result.metadata.titleName && result.metadata.titleName !== 'Unknown') tempTitle = result.metadata.titleName;
+            if (result.metadata.version) tempVer = result.metadata.version;
+            logger.success(`[PS5] ffpkg parsed successfully — ${tempTitle} [${tempPpsa}][${tempVer}]`);
+          } else {
+            logger.warn(`[PS5] ffpkg parse failed: ${result.message}`);
+          }
+
+          const updatedFfpkgName = `${sanitizeFileName(tempTitle)} [${tempPpsa}][${tempVer}][Game].ffpkg`;
+          const renamedFfpkgPath = path.join(path.dirname(extractedFfpkgPath), updatedFfpkgName);
+          if (path.resolve(extractedFfpkgPath) !== path.resolve(renamedFfpkgPath)) {
+            try { fs.renameSync(extractedFfpkgPath, renamedFfpkgPath); } catch (e) {}
+          }
+        } else if (paramPath) {
+          try {
+            const rawParam = fs.readFileSync(paramPath, 'utf-8');
+            const parsedParam = JSON.parse(rawParam);
+            if (parsedParam.titleId && parsedParam.titleId !== 'Unknown') tempPpsa = parsedParam.titleId;
+            const parsedTitle = deriveTitleNameFromParam(parsedParam);
+            if (parsedTitle) tempTitle = sanitizeFileName(parsedTitle);
+            tempVer = deriveVersionFromParam(parsedParam);
+            logger.success(`[PS5] Folder metadata extracted — ${tempTitle} [${tempPpsa}][${tempVer}]`);
+          } catch (e) {}
+          targetForCompression = findShallowestEbootDir(outputFolderPath) || outputFolderPath;
         }
+
+        const updatedBaseNameLabel = `${sanitizeFileName(tempTitle)} [${tempPpsa}][${tempVer}][Game]`;
+
+        if (workingPassword === '' && !isSplit) {
+          // A-b-2-2, A-b-2-3: Unencrypted Single Archive (but required full extraction to get metadata)
+          // Do NOT recompress. Discard extracted contents and just rename the original archive.
+          try { fs.rmSync(outputFolderPath, { recursive: true, force: true }); } catch (rmErr) {}
+          
+          const ext = path.extname(mainFilePath);
+          const destPath = path.join(downloadDir, `${updatedBaseNameLabel}${ext}`);
+          if (mainFilePath !== destPath) {
+            try { fs.renameSync(mainFilePath, destPath); } catch (e) {}
+            logger.success(`[PS5] Renamed archive: ${path.basename(destPath)}`);
+          }
+          processSpinner.succeed(`[PS5] Processed and renamed unencrypted archive.`);
+          processedCount++;
+          finalTitle = tempTitle;
+          finalPpsa = tempPpsa;
+          finalVer = tempVer;
+          continue;
+        }
+
+        // Encrypted (A-b-1, A-c-1) or Split (A-c-2): We MUST recompress
+        const dest7zPath = getUniqueFilePath(downloadDir, updatedBaseNameLabel, '.7z');
+        const compressingPath = `${dest7zPath}.compressing`;
+
+        processSpinner.text = `[PS5] Compressing to ${path.basename(dest7zPath)}...`;
+
+        await compressFolderTo7z(targetForCompression, compressingPath, (text) => {
+          processSpinner.text = `[PS5] [Compressing] ${tempPpsa} - ${text}`;
+        });
+
+        if (!fs.existsSync(compressingPath) || fs.statSync(compressingPath).size === 0) {
+          throw new Error(`Recompressed 7z is empty: ${compressingPath}`);
+        }
+
+        fs.renameSync(compressingPath, dest7zPath);
+
+        // Delete original archives
+        for (const file of archiveFiles) {
+          try { fs.unlinkSync(path.join(downloadDir, file)); } catch (unlinkErr) {}
+        }
+        
+        try { fs.rmSync(outputFolderPath, { recursive: true, force: true }); } catch (rmErr) {}
+
+        processSpinner.succeed(`[PS5] Processed and recompressed archive to: ${path.basename(dest7zPath)}`);
+        processedCount++;
+        finalTitle = tempTitle;
+        finalPpsa = tempPpsa;
+        finalVer = tempVer;
+      } catch (err) {
+        processSpinner.fail(`[PS5] Archive processing failed for ${ppsaKey}: ${err.message}`);
+        try { if (fs.existsSync(outputFolderPath)) fs.rmSync(outputFolderPath, { recursive: true, force: true }); } catch (e) {}
       }
     }
   }
