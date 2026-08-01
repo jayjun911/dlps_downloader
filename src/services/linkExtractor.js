@@ -50,6 +50,7 @@ function getRegionPriority(regionName) {
 
 // Download host priority. Lower index represents higher priority.
 const HOST_PRIORITY_PATTERNS = [
+  /filekeeper\.net/i,
   /mediafire\.com/i,
   /datanodes\.to/i,
   /1fichier\.com|1file/i,
@@ -68,6 +69,7 @@ function getHostPriority(url) {
 }
 
 function getHostNameFromUrl(url) {
+  if (/filekeeper\.net/i.test(url)) return 'FileKeeper';
   if (/1fichier\.com|1file/i.test(url)) return '1fichier';
   if (/datanodes\.to/i.test(url)) return 'Datanodes';
   if (/mediafire\.com/i.test(url)) return 'Mediafire';

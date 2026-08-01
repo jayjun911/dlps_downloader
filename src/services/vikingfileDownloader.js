@@ -163,4 +163,57 @@ async function downloadFromVikingfile(fileUrl, destDir, onProgress, onStatus) {
   return { destPath, filename, size: downloaded, directUrl };
 }
 
-module.exports = { downloadFromVikingfile, extractVikingfileHash };
+/**
+ * Resolves only the direct download URL from a vikingfile link via browser.
+ * Does NOT download the file — use this when handing off to FDM.
+ */
+async function resolveVikingfileDirectUrl(fileUrl, onStatus) {
+  const hash = extractVikingfileHash(fileUrl);
+  if (!hash) throw new Error(`Cannot parse vikingfile hash from URL: ${fileUrl}`);
+
+  const pageUrl = `https://vik1ngfile.site/f/${hash}`;
+  const edgePath = process.env.EDGE_PATH || findEdge();
+  if (!edgePath) throw new Error('Microsoft Edge not found.');
+
+  if (onStatus) onStatus('Opening Edge browser for Vikingfile Turnstile...');
+
+  const browser = await chromium.launch({
+    executablePath: edgePath,
+    headless: false,
+    args: ['--no-sandbox', '--disable-blink-features=AutomationControlled', '--window-size=900,650', '--window-position=100,100'],
+  });
+
+  let directUrl = null;
+  try {
+    const context = await browser.newContext({ userAgent: USER_AGENT, viewport: { width: 900, height: 650 }, locale: 'ko-KR', timezoneId: 'Asia/Seoul' });
+    await context.addInitScript(STEALTH_SCRIPT);
+    const page = await context.newPage();
+
+    directUrl = await new Promise((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error('Vikingfile Turnstile timed out after 120s.')), 120000);
+      page.on('response', async (response) => {
+        if (response.url().includes('/f/') && response.request().method() === 'POST') {
+          try {
+            const json = JSON.parse(await response.text());
+            if (json.link) { clearTimeout(t); resolve(decodeURIComponent(json.link)); }
+          } catch (_) {}
+        }
+      });
+      page.on('close', () => { clearTimeout(t); reject(new Error('Browser closed before Vikingfile link was captured.')); });
+      if (onStatus) onStatus('Browser open — Turnstile solving (click checkbox if prompted)');
+      page.goto(pageUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(reject);
+    });
+  } finally {
+    await browser.close().catch(() => {});
+  }
+
+  if (!directUrl) throw new Error(`Failed to resolve Vikingfile direct URL for: ${fileUrl}`);
+
+  let filename = null;
+  try { filename = decodeURIComponent(path.basename(new URL(directUrl).pathname)); } catch (_) {}
+  filename = (filename || `vikingfile_${hash}`).replace(/[\\/:*?"<>|]/g, '_').trim();
+
+  return { directUrl, filename };
+}
+
+module.exports = { downloadFromVikingfile, resolveVikingfileDirectUrl, extractVikingfileHash };

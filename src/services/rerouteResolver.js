@@ -15,10 +15,10 @@ function sanitizeFichierUrl(url) {
 }
 
 // Regular expression to match allowed download host domains
-const DOWNLOAD_HOST_REGEX = /^https?:\/\/(?:www\.)?(?:1fichier\.com|datanodes\.to|mediafire\.com|rootz\.so|akirabox\.com|vikingfile\.com|mega\.nz|buzzheavier\.com)\//i;
+const DOWNLOAD_HOST_REGEX = /^https?:\/\/(?:www\.)?(?:1fichier\.com|datanodes\.to|mediafire\.com|rootz\.so|akirabox\.com|vikingfile\.com|mega\.nz|buzzheavier\.com|filekeeper\.net)\//i;
 
 // Regular expression to find URLs inside plain text
-const PLAIN_TEXT_URL_REGEX = /https?:\/\/(?:www\.)?(?:1fichier\.com|datanodes\.to|mediafire\.com|rootz\.so|akirabox\.com|vikingfile\.com|mega\.nz|buzzheavier\.com)\/[^\s"'<>]+/gi;
+const PLAIN_TEXT_URL_REGEX = /https?:\/\/(?:www\.)?(?:1fichier\.com|datanodes\.to|mediafire\.com|rootz\.so|akirabox\.com|vikingfile\.com|mega\.nz|buzzheavier\.com|filekeeper\.net)\/[^\s"'<>]+/gi;
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
 

@@ -235,6 +235,8 @@ async function processPendingArchivesPS5(downloadDir, pending = [], passwordOpti
     });
 
     const archiveFiles = matchedFiles.filter(isArchiveFile);
+    const bareExfatFiles = matchedFiles.filter(f => f.toLowerCase().endsWith('.exfat') && !f.toLowerCase().includes('[game]'));
+    const bareFfpkgFiles = matchedFiles.filter(f => f.toLowerCase().endsWith('.ffpkg') && !f.toLowerCase().includes('[game]'));
 
     // Base default metadata
     let finalTitle = pendingEntry.title;
@@ -293,6 +295,75 @@ async function processPendingArchivesPS5(downloadDir, pending = [], passwordOpti
         compressSpinner.fail(`[PS5] Folder compression failed for ${folderName}: ${err.message}`);
         try { if (fs.existsSync(compressingPath)) fs.unlinkSync(compressingPath); } catch (e) {}
       }
+    }
+
+    // ==========================================
+    // A-d: Process Bare Files (.exfat, .ffpkg)
+    // ==========================================
+    for (const bareName of bareExfatFiles) {
+      let tempTitle = finalTitle;
+      let tempPpsa = finalPpsa;
+      let tempVer = finalVer;
+      const barePath = path.join(downloadDir, bareName);
+      
+      const inspectSpinner = ora(`[PS5] Mounting bare exFAT for validation and metadata...`).start();
+      const result = await mountValidateAndExtractParam(barePath, (s) => {
+        inspectSpinner.text = `[PS5] ${s}`;
+      });
+      if (result.metadata) {
+        if (result.metadata.titleId && result.metadata.titleId !== 'Unknown') tempPpsa = result.metadata.titleId;
+        if (result.metadata.titleName && result.metadata.titleName !== 'Unknown') tempTitle = result.metadata.titleName;
+        if (result.metadata.version) tempVer = result.metadata.version;
+      }
+      if (result.skipped) {
+        logger.warn(`[PS5] OSFMount not available — skipped exFAT validation`);
+      } else if (!result.valid) {
+        logger.warn(`[PS5] exFAT chkdsk validation failed: ${result.message}`);
+      } else {
+        logger.success(`[PS5] exFAT Mounted & Validated — ${tempTitle} [${tempPpsa}][${tempVer}]`);
+      }
+
+      const updatedBaseNameLabel = `${sanitizeFileName(tempTitle)} [${tempPpsa}][${tempVer}][Game]`;
+      const destPath = path.join(downloadDir, `${updatedBaseNameLabel}.exfat`);
+      if (barePath !== destPath) {
+        try { fs.renameSync(barePath, destPath); } catch (e) {}
+        logger.success(`[PS5] Renamed bare file: ${path.basename(destPath)}`);
+      }
+      inspectSpinner.succeed(`[PS5] Processed and renamed bare exfat file.`);
+      processedCount++;
+      finalTitle = tempTitle;
+      finalPpsa = tempPpsa;
+      finalVer = tempVer;
+    }
+
+    for (const bareName of bareFfpkgFiles) {
+      let tempTitle = finalTitle;
+      let tempPpsa = finalPpsa;
+      let tempVer = finalVer;
+      const barePath = path.join(downloadDir, bareName);
+      
+      const inspectSpinner = ora(`[PS5] Parsing bare ffpkg for metadata...`).start();
+      const result = readFfpkgParam(barePath);
+      if (result.metadata) {
+        if (result.metadata.titleId && result.metadata.titleId !== 'Unknown') tempPpsa = result.metadata.titleId;
+        if (result.metadata.titleName && result.metadata.titleName !== 'Unknown') tempTitle = result.metadata.titleName;
+        if (result.metadata.version) tempVer = result.metadata.version;
+        logger.success(`[PS5] ffpkg parsed successfully — ${tempTitle} [${tempPpsa}][${tempVer}]`);
+      } else {
+        logger.warn(`[PS5] ffpkg parse failed: ${result.message}`);
+      }
+
+      const updatedBaseNameLabel = `${sanitizeFileName(tempTitle)} [${tempPpsa}][${tempVer}][Game]`;
+      const destPath = path.join(downloadDir, `${updatedBaseNameLabel}.ffpkg`);
+      if (barePath !== destPath) {
+        try { fs.renameSync(barePath, destPath); } catch (e) {}
+        logger.success(`[PS5] Renamed bare file: ${path.basename(destPath)}`);
+      }
+      inspectSpinner.succeed(`[PS5] Processed and renamed bare ffpkg file.`);
+      processedCount++;
+      finalTitle = tempTitle;
+      finalPpsa = tempPpsa;
+      finalVer = tempVer;
     }
 
     // ==========================================
@@ -770,7 +841,7 @@ async function handlePending(titleQuery = '', options = {}) {
 
   const selectedMap = new Map(); // rowIndex -> customPpsa
   rows.forEach((r, i) => {
-    if (r.file || ((targetPpsa || titleQuery) && rows.length === 1)) {
+    if (r.file) {
       selectedMap.set(i, targetPpsa || r.entry.ppsa || 'Unknown');
     }
   });

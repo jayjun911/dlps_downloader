@@ -236,7 +236,7 @@ async function downloadSingleGame(game, options = {}) {
           logger.info(`Filtering downloads for type "${targetType}" (${bestLinks.urls.length} files matched)`);
         }
         
-        if (bestLinks.hostName === '1fichier' || bestLinks.hostName === 'Datanodes' || bestLinks.hostName === 'Mediafire') {
+        if (bestLinks.hostName === '1fichier' || bestLinks.hostName === 'Datanodes' || bestLinks.hostName === 'Mediafire' || bestLinks.hostName === 'FileKeeper' || bestLinks.hostName === 'Viki') {
           const downloadDir = options.out || process.env.DOWNLOAD_DIR || path.join(__dirname, '../../downloads');
           const downloadUrls = bestLinks.urls.filter(url => !url.startsWith('text_guide:'));
           const textGuideUrls = bestLinks.urls.filter(url => url.startsWith('text_guide:'));
@@ -316,6 +316,9 @@ async function downloadSingleGame(game, options = {}) {
                     },
                     (status) => { partSpinner.text = status; }
                   );
+                } else if (bestLinks.hostName === 'FileKeeper') {
+                  const { downloadWithFdm } = require('../services/fdmDownloader');
+                  result = await downloadWithFdm(fileUrl, downloadDir, (status) => { partSpinner.text = status; });
                 } else {
                   result = await download1fichier(fileUrl, downloadDir, (progress) => {
                     partSpinner.text = `Downloading${typeLabel}${partLabel}: ${progress.percent}% (${progress.receivedMB}MB / ${progress.totalMB}MB)`;

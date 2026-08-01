@@ -329,6 +329,14 @@ async function downloadWithFdm(fileUrl, destDir, onStatus, is1fichier = false, p
     if (onStatus) onStatus('Resolving MediaFire URL...');
     const { resolveMediafireDirectUrl } = require('./mediafireDownloader');
     ({ directUrl, filename } = await resolveMediafireDirectUrl(fileUrl));
+  } else if (/filekeeper\.net/i.test(fileUrl)) {
+    if (onStatus) onStatus('Resolving FileKeeper URL via browser...');
+    const { resolveFilekeeperDirectUrl } = require('./filekeeperDownloader');
+    ({ directUrl, filename } = await resolveFilekeeperDirectUrl(fileUrl, onStatus));
+  } else if (/vikingfile\.com|viki/i.test(fileUrl)) {
+    if (onStatus) onStatus('Resolving Vikingfile URL via browser...');
+    const { resolveVikingfileDirectUrl } = require('./vikingfileDownloader');
+    ({ directUrl, filename } = await resolveVikingfileDirectUrl(fileUrl, onStatus));
   } else {
     if (onStatus) onStatus('Resolving datanodes URL (may take a moment)...');
     ({ directUrl, filename } = await resolveDatanodesDirectUrl(fileUrl));
@@ -387,6 +395,16 @@ async function downloadAllWithFdm(fileUrls, destDir, onStatus, is1fichier = fals
     } else if (/mediafire\.com/i.test(fileUrl)) {
       const { resolveMediafireDirectUrl } = require('./mediafireDownloader');
       ({ directUrl, filename } = await resolveMediafireDirectUrl(fileUrl));
+    } else if (/filekeeper\.net/i.test(fileUrl)) {
+      const { resolveFilekeeperDirectUrl } = require('./filekeeperDownloader');
+      ({ directUrl, filename } = await resolveFilekeeperDirectUrl(fileUrl, (msg) => {
+        if (onStatus) onStatus(`${prefix}${msg}`);
+      }));
+    } else if (/vikingfile\.com|viki/i.test(fileUrl)) {
+      const { resolveVikingfileDirectUrl } = require('./vikingfileDownloader');
+      ({ directUrl, filename } = await resolveVikingfileDirectUrl(fileUrl, (msg) => {
+        if (onStatus) onStatus(`${prefix}${msg}`);
+      }));
     } else {
       ({ directUrl, filename } = await resolveDatanodesDirectUrl(fileUrl));
     }

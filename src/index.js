@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-require('dotenv').config();
+require('dotenv').config({ override: true });
 const { program } = require('commander');
 const listCommand = require('./commands/list');
 const downloadCommand = require('./commands/download');
