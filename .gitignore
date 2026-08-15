@@ -19,3 +19,4 @@ data/pending_manual-ps4.json
 .claude/settings.local.json
 data/downloaded-ps5.xml.bak
 data/pending_manual-ps5.json
+data/filekeeper_session.json

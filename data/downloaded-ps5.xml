@@ -4284,4 +4284,103 @@
     <Source></Source>
     <Region>USA (exFAT)</Region>
   </Game>
+  <Game>
+    <Title>Rez Infinite</Title>
+    <FileName>Rez Infinite [PPSA09165][v01.008][GAME].7z</FileName>
+    <PPSA>PPSA09165</PPSA>
+    <Password></Password>
+    <DownloadedAt>2026-08-01T07:18:25.210Z</DownloadedAt>
+    <Source></Source>
+    <Region>EUR (exFAT)</Region>
+  </Game>
+  <Game>
+    <Title>Puzzle Bobble 3D Vacation Odyssey</Title>
+    <FileName>Puzzle Bobble 3D - Vacation Odyssey [PPSA03712][v01.006][GAME].7z</FileName>
+    <PPSA>PPSA03712</PPSA>
+    <Password></Password>
+    <DownloadedAt>2026-08-01T07:30:37.685Z</DownloadedAt>
+    <Source></Source>
+    <Region>USA (exFAT)</Region>
+  </Game>
+  <Game>
+    <Title>Pac Man World 2 Re PAC</Title>
+    <FileName>PAC-MAN WORLD 2 Re-PAC [PPSA18189][v01.000.004].7z</FileName>
+    <PPSA>PPSA18189</PPSA>
+    <Password></Password>
+    <DownloadedAt>2026-08-01T07:34:02.090Z</DownloadedAt>
+    <Source></Source>
+    <Region>USA (@DLPS Team)</Region>
+  </Game>
+  <Game>
+    <Title>Space Adventure Cobra The Awakening</Title>
+    <FileName>Space Adventure Cobra - The Awakening [PPSA17337][v01.004].7z</FileName>
+    <PPSA>PPSA17337</PPSA>
+    <Password></Password>
+    <DownloadedAt>2026-08-01T07:37:20.513Z</DownloadedAt>
+    <Source></Source>
+    <Region>EUR</Region>
+  </Game>
+  <Game>
+    <Title>Slay The Princess The Pristine Cut</Title>
+    <FileName>Slay The Princess [PPSA24423][v02.003].7z</FileName>
+    <PPSA>PPSA24423</PPSA>
+    <Password></Password>
+    <DownloadedAt>2026-08-01T07:37:23.135Z</DownloadedAt>
+    <Source></Source>
+    <Region>USA</Region>
+  </Game>
+  <Game>
+    <Title>SpellForce Conquest of Eo</Title>
+    <FileName>SpellForce - Conquest of Eo [PPSA17231][v01.004.300][GAME].7z</FileName>
+    <PPSA>PPSA17231</PPSA>
+    <Password></Password>
+    <DownloadedAt>2026-08-01T07:44:03.592Z</DownloadedAt>
+    <Source></Source>
+    <Region>EUR (exFAT)</Region>
+  </Game>
+  <Game>
+    <Title>SPY X ANYA Operation Memories Deluxe Edition</Title>
+    <FileName>SPY×ANYA - Operation Memories [PPSA15209][v01.001][GAME].7z</FileName>
+    <PPSA>PPSA15209</PPSA>
+    <Password></Password>
+    <DownloadedAt>2026-08-01T08:00:02.160Z</DownloadedAt>
+    <Source></Source>
+    <Region>JPN (SPY×ANYA: Operation Memories) (exFAT)</Region>
+  </Game>
+  <Game>
+    <Title>Syberia Remastered</Title>
+    <FileName>Syberia - Remastered [PPSA30140][v01.003][GAME].7z</FileName>
+    <PPSA>PPSA30140</PPSA>
+    <Password></Password>
+    <DownloadedAt>2026-08-01T08:06:47.085Z</DownloadedAt>
+    <Source></Source>
+    <Region>EUR (v01.003) (exFAT)</Region>
+  </Game>
+  <Game>
+    <Title>Mighty Morphin Power Rangers Ritas Rewind</Title>
+    <FileName>mighty morphin power rangers - rita&apos;s rewind [ppsa18529][v01.009][game].7z</FileName>
+    <PPSA>PPSA18529</PPSA>
+    <Password></Password>
+    <DownloadedAt>2026-08-01T08:22:01.907Z</DownloadedAt>
+    <Source>Manual</Source>
+    <Region>Unknown</Region>
+  </Game>
+  <Game>
+    <Title>One Last Breath</Title>
+    <FileName>one last breath [ppsa18172][v02.000][game].zip</FileName>
+    <PPSA>PPSA18172</PPSA>
+    <Password></Password>
+    <DownloadedAt>2026-08-01T08:22:10.663Z</DownloadedAt>
+    <Source>Manual</Source>
+    <Region>Unknown</Region>
+  </Game>
+  <Game>
+    <Title>Redout 2</Title>
+    <FileName>redout 2 [ppsa05849][v01.107][game].rar</FileName>
+    <PPSA>PPSA05849</PPSA>
+    <Password></Password>
+    <DownloadedAt>2026-08-01T08:25:55.027Z</DownloadedAt>
+    <Source>Manual</Source>
+    <Region>Unknown</Region>
+  </Game>
 </Downloaded>
