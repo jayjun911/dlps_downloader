@@ -34,7 +34,7 @@ program
   .option('-p, --password <string>', 'Override archive password (used when auto-detection fails)')
   .option('-o, --out <path>', 'Override the default download directory')
   .option('-f, --fallback', 'Allow non-exFAT sections as a fallback when an exFAT section exists (default: exFAT-exclusive)')
-  .option('-i, --interactive', 'Open game page in browser when a download fails (for manual inspection)')
+  .option('-i, --interactive', 'Open game page in browser and queue to pending for manual download')
   .option('--force', 'Ignore JPN/platform labels and download regardless')
   .description('Download a game by title, a batch from the TBD list, or a direct file URL')
   .action((title, options) => {
@@ -82,12 +82,12 @@ program
 
 program
   .command('process')
-  .argument('<filepath>', 'Path to a downloaded .exfat or archive file (.rar/.zip/.7z)')
+  .argument('<path>', 'Path to a downloaded file (.exfat/.rar/.zip/.7z/.ffpkg) or decompressed folder')
   .option('-p, --password <string>', 'Archive password (if needed)')
-  .description('Post-process a manually downloaded file: validate, rename, compress, register')
-  .action((filepath, options) => {
+  .description('Post-process a manually downloaded file or decompressed folder: validate, rename, compress, register')
+  .action((targetPath, options) => {
     const processCommand = require('./commands/process');
-    processCommand(filepath, options);
+    processCommand(targetPath, options);
   });
 
 program

@@ -12,6 +12,7 @@ const {
   compressFileTo7z, 
   findShallowestEbootDir, 
   findWorkingPassword, 
+  findParamJson,
   sanitizeFileName 
 } = require('../services/unrarService');
 
@@ -23,6 +24,9 @@ const {
   buildTypeTag,
   findFilesWithExt
 } = require('../utils/postProcessor');
+
+const { deriveTitleNameFromParam, deriveVersionFromParam, extractVersion } = require('../utils/versionParser');
+const { extractPPSA } = require('../utils/ppsaParser');
 
 class PS5Platform extends BasePlatform {
   getName() {
@@ -237,7 +241,27 @@ class PS5Platform extends BasePlatform {
       const isGame = type === 'GAME';
       const archives = files.filter(isArchiveFile);
       const extraFiles = files.filter(f => !isArchiveFile(f));
-      const ffpkgFiles = extraFiles.filter(f => f.toLowerCase().endsWith('.ffpkg'));
+      const directories = extraFiles.filter(f => {
+        try { return fs.statSync(path.join(downloadDir, f)).isDirectory(); } catch (e) { return false; }
+      });
+      const nonDirExtraFiles = extraFiles.filter(f => !directories.includes(f));
+      const ffpkgFiles = nonDirExtraFiles.filter(f => f.toLowerCase().endsWith('.ffpkg'));
+
+      if (isGame && directories.length > 0) {
+        for (const dir of directories) {
+          const folderPath = path.join(downloadDir, dir);
+          const { registeredFile, metadata } = await this.processFolder({
+            folderPath, downloadDir, password,
+            initialTitle: finalTitle, initialPpsa: finalPpsa, initialVer: finalVer
+          });
+          if (metadata) {
+            if (metadata.titleId)   finalPpsa  = metadata.titleId;
+            if (metadata.titleName) finalTitle = metadata.titleName;
+            if (metadata.version)   finalVer   = metadata.version;
+          }
+          if (registeredFile) registeredFiles.push(registeredFile);
+        }
+      }
 
       if (isGame && ffpkgFiles.length > 0) {
         for (const ff of ffpkgFiles) {
@@ -268,7 +292,7 @@ class PS5Platform extends BasePlatform {
           if (registeredFile) registeredFiles.push(registeredFile);
         }
 
-        const rawExfats = extraFiles.filter(f => f.toLowerCase().endsWith('.exfat'));
+        const rawExfats = nonDirExtraFiles.filter(f => f.toLowerCase().endsWith('.exfat'));
         for (const rawFile of rawExfats) {
           const { registeredFile, metadata } = await this.processRawExfat({
             filename: rawFile, type, downloadDir,
@@ -299,7 +323,7 @@ class PS5Platform extends BasePlatform {
         }
       }
 
-      for (const file of extraFiles) {
+      for (const file of nonDirExtraFiles) {
         if (file.toLowerCase().endsWith('.ffpkg')) continue; // handled above
 
         const ext    = path.extname(file).toLowerCase();
@@ -388,6 +412,9 @@ class PS5Platform extends BasePlatform {
       }
     }
     
+    registeredFiles.finalTitle = finalTitle;
+    registeredFiles.finalPpsa  = finalPpsa;
+    registeredFiles.finalVer   = finalVer;
     return registeredFiles;
   }
 
@@ -407,6 +434,200 @@ class PS5Platform extends BasePlatform {
       }
     } catch (e) {}
     return null;
+  }
+
+  findFfpkgInFolder(folderPath) {
+    try {
+      for (const entry of fs.readdirSync(folderPath)) {
+        const full = path.join(folderPath, entry);
+        if (entry.toLowerCase().endsWith('.ffpkg')) return full;
+        try {
+          if (fs.statSync(full).isDirectory()) {
+            const found = this.findFfpkgInFolder(full);
+            if (found) return found;
+          }
+        } catch (e) {}
+      }
+    } catch (e) {}
+    return null;
+  }
+
+  async processFolder({ folderPath, downloadDir, password, initialTitle, initialPpsa, initialVer }) {
+    if (!fs.existsSync(folderPath)) {
+      throw new Error(`Folder not found: ${folderPath}`);
+    }
+    const entries = fs.readdirSync(folderPath);
+    if (entries.length === 0) {
+      throw new Error(`Folder is empty: ${folderPath}`);
+    }
+
+    const folderName = path.basename(folderPath);
+
+    // 1. Check if folder contains .exfat
+    const exfatPath = this.findExfatInFolder(folderPath);
+    if (exfatPath) {
+      const { mountValidateAndExtractParam } = require('../services/osfmountService');
+      const mountSpinner = ora(`[GAME] Mounting exFAT in folder for validation and metadata...`).start();
+      let metadata = null;
+      try {
+        const result = await mountValidateAndExtractParam(exfatPath, (s) => { mountSpinner.text = `[GAME] ${s}`; });
+        metadata = result.metadata;
+        if (result.skipped) {
+          mountSpinner.warn(`[GAME] OSFMount not available — skipped validation`);
+        } else if (!result.valid) {
+          mountSpinner.fail(`[GAME] exFAT validation failed: ${result.message}`);
+          const err = new Error('exFAT validation failed: filesystem errors detected');
+          err.isExfatValidationError = true;
+          throw err;
+        } else {
+          const metaStr = metadata ? `${metadata.titleName} [${metadata.titleId}] ${metadata.version}` : '(no param.json)';
+          mountSpinner.succeed(`[GAME] Validated — ${metaStr}`);
+        }
+      } catch (mountErr) {
+        if (mountErr.isExfatValidationError) throw mountErr;
+        mountSpinner.warn(`[GAME] Validation error (continuing): ${mountErr.message}`);
+      }
+
+      const realTitle = (metadata && metadata.titleName) || (initialTitle !== 'Unknown Game' ? initialTitle : null) || sanitizeFileName(folderName.replace(/\[.*?\]/g, '').trim()) || 'Unknown Game';
+      const realPpsa  = (metadata && metadata.titleId)   || (initialPpsa !== 'Unknown' ? initialPpsa : null) || extractPPSA(folderName) || 'Unknown';
+      const realVer   = (metadata && metadata.version)   || initialVer || extractVersion(folderName) || 'v01.00';
+      const baseName  = `${sanitizeFileName(realTitle)} [${realPpsa}][${realVer}][GAME]`;
+
+      const dest7zPath = getUniqueFilePath(downloadDir, baseName, '.7z');
+      const compressSpinner = ora(`[GAME] Compressing exFAT to ${path.basename(dest7zPath)}...`).start();
+      try {
+        await compressFileTo7z(exfatPath, dest7zPath);
+        if (!fs.existsSync(dest7zPath) || fs.statSync(dest7zPath).size === 0) throw new Error('Output 7z is empty');
+        compressSpinner.succeed(`[GAME] Compressed: ${path.basename(dest7zPath)}`);
+        try { fs.rmSync(folderPath, { recursive: true, force: true }); } catch (e) {}
+        return {
+          registeredFile: { fileName: path.basename(dest7zPath), type: 'GAME', title: realTitle, ppsa: realPpsa, version: realVer },
+          metadata: { titleName: realTitle, titleId: realPpsa, version: realVer }
+        };
+      } catch (compErr) {
+        compressSpinner.fail(`[GAME] Compression failed: ${compErr.message}. Keeping folder.`);
+        throw compErr;
+      }
+    }
+
+    // 2. Check if folder contains .ffpkg
+    const ffpkgPath = this.findFfpkgInFolder(folderPath);
+    if (ffpkgPath) {
+      const { readFfpkgParam } = require('../services/ufs2Reader');
+      const spinner = ora(`[GAME] Validating .ffpkg in folder (UFS2) and reading param.json...`).start();
+      let metadata = null;
+      const result = readFfpkgParam(ffpkgPath);
+      metadata = result.metadata;
+      if (result.valid) {
+        const metaStr = metadata ? `${metadata.titleName} [${metadata.titleId}] ${metadata.version}` : '(no param.json)';
+        spinner.succeed(`[GAME] Validated — ${metaStr}`);
+      } else if (result.fsValid) {
+        spinner.stop();
+        logger.warn(`[GAME] Valid PS5 game image, but couldn't read param.json (non-standard .ffpkg layout) — naming from filename`);
+      } else {
+        spinner.fail(`[GAME] .ffpkg validation failed: ${result.message}`);
+        const err = new Error(`.ffpkg validation failed: ${result.message}`);
+        err.isFfpkgValidationError = true;
+        throw err;
+      }
+
+      const realTitle = (metadata && metadata.titleName) || (initialTitle !== 'Unknown Game' ? initialTitle : null) || sanitizeFileName(folderName.replace(/\[.*?\]/g, '').trim()) || 'Unknown Game';
+      const realPpsa  = (metadata && metadata.titleId)   || (initialPpsa !== 'Unknown' ? initialPpsa : null) || extractPPSA(folderName) || 'Unknown';
+      const realVer   = (metadata && metadata.version)   || initialVer || extractVersion(folderName) || 'v01.00';
+      const baseName  = `${sanitizeFileName(realTitle)} [${realPpsa}][${realVer}]`;
+
+      const dest7zPath = getUniqueFilePath(downloadDir, baseName, '.7z');
+      const compressSpinner = ora(`[GAME] Compressing .ffpkg to ${path.basename(dest7zPath)}...`).start();
+      try {
+        await compressFileTo7z(ffpkgPath, dest7zPath);
+        if (!fs.existsSync(dest7zPath) || fs.statSync(dest7zPath).size === 0) throw new Error('Output 7z is empty');
+        compressSpinner.succeed(`[GAME] Compressed: ${path.basename(dest7zPath)}`);
+        try { fs.rmSync(folderPath, { recursive: true, force: true }); } catch (e) {}
+        return {
+          registeredFile: { fileName: path.basename(dest7zPath), type: 'GAME', title: realTitle, ppsa: realPpsa, version: realVer },
+          metadata: { titleName: realTitle, titleId: realPpsa, version: realVer }
+        };
+      } catch (compErr) {
+        compressSpinner.fail(`[GAME] Compression failed: ${compErr.message}. Keeping folder.`);
+        throw compErr;
+      }
+    }
+
+    // 3. Check if folder contains .pkg files (PS4 packages)
+    const pkgFiles = findFilesWithExt(folderPath, '.pkg');
+    if (pkgFiles.length > 0) {
+      let firstTitle = initialTitle;
+      let firstPpsa = initialPpsa;
+      let primaryReg = null;
+      for (const pkgPath of pkgFiles) {
+        const pkgFileName = path.basename(pkgPath);
+        const targetPath = getUniqueFilePath(downloadDir, path.parse(pkgFileName).name, '.pkg', pkgPath);
+        if (path.resolve(pkgPath) !== path.resolve(targetPath)) {
+          fs.renameSync(pkgPath, targetPath);
+        }
+        const ppsa = extractPPSA(pkgFileName) || initialPpsa;
+        if (firstPpsa === 'Unknown' && ppsa !== 'Unknown') firstPpsa = ppsa;
+        logger.success(`[GAME] Moved PKG: ${path.basename(targetPath)}`);
+        const reg = { fileName: path.basename(targetPath), type: 'GAME', title: firstTitle, ppsa, version: initialVer };
+        if (!primaryReg) primaryReg = reg;
+      }
+      try { fs.rmSync(folderPath, { recursive: true, force: true }); } catch (e) {}
+      return {
+        registeredFile: primaryReg,
+        metadata: { titleName: firstTitle, titleId: firstPpsa, version: initialVer }
+      };
+    }
+
+    // 4. Standard decompressed PS5 game folder
+    const paramPath = findParamJson(folderPath);
+    let metadata = null;
+    if (paramPath) {
+      try {
+        const content = fs.readFileSync(paramPath, 'utf-8');
+        const param = JSON.parse(content);
+        const titleId = param.titleId && param.titleId !== 'Unknown' ? param.titleId : null;
+        const titleName = deriveTitleNameFromParam(param);
+        const version = deriveVersionFromParam(param);
+        metadata = {
+          titleId,
+          titleName,
+          version
+        };
+        const metaDisplay = `${titleName || 'Unknown'} [${titleId || 'Unknown'}] ${version}`;
+        logger.info(`[GAME] Read param.json from folder: ${metaDisplay}`);
+      } catch (e) {
+        logger.warn(`Failed to parse param.json: ${e.message}`);
+      }
+    }
+
+    const realTitle = (metadata && metadata.titleName) || (initialTitle !== 'Unknown Game' ? initialTitle : null) || sanitizeFileName(folderName.replace(/\[.*?\]/g, '').trim()) || 'Unknown Game';
+    const realPpsa  = (metadata && metadata.titleId)   || (initialPpsa !== 'Unknown' ? initialPpsa : null) || extractPPSA(folderName) || 'Unknown';
+    const realVer   = (metadata && metadata.version)   || initialVer || extractVersion(folderName) || 'v01.00';
+    const baseName  = `${sanitizeFileName(realTitle)} [${realPpsa}][${realVer}]`;
+
+    const compressRoot = findShallowestEbootDir(folderPath) || folderPath;
+    const dest7zPath = getUniqueFilePath(downloadDir, baseName, '.7z');
+    const compressSpinner = ora(`[GAME] Compressing folder to ${path.basename(dest7zPath)}...`).start();
+
+    try {
+      await compressFolderTo7z(compressRoot, dest7zPath, (text) => {
+        compressSpinner.text = `[GAME] ${realPpsa} - ${text}`;
+      });
+      if (!fs.existsSync(dest7zPath) || fs.statSync(dest7zPath).size === 0) {
+        throw new Error(`Output 7z is empty: ${dest7zPath}`);
+      }
+      compressSpinner.succeed(`[GAME] Compressed: ${path.basename(dest7zPath)}`);
+      try { fs.rmSync(folderPath, { recursive: true, force: true }); } catch (e) {}
+      return {
+        registeredFile: { fileName: path.basename(dest7zPath), type: 'GAME', title: realTitle, ppsa: realPpsa, version: realVer },
+        metadata: { titleName: realTitle, titleId: realPpsa, version: realVer }
+      };
+    } catch (compErr) {
+      compressSpinner.fail(`[GAME] Folder compression failed: ${compErr.message}. Keeping folder.`);
+      const tmpPath = dest7zPath.replace(/\.7z$/i, '.compressing');
+      try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch (e) {}
+      throw compErr;
+    }
   }
 
   async processExfatArchive({ archiveSet, type, downloadDir, password, initialTitle, initialPpsa, initialVer }) {

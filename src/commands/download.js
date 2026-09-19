@@ -10,10 +10,11 @@ const { getUniqueFilePath } = require('../utils/postProcessor');
 const { loadProgressSet, markProgress, clearProgress } = require('../services/progressDb');
 const { platformDataPath, getCurrentPlatformKey } = require('../services/platformConfig');
 const { setLabel } = require('../services/labelDb');
-const { addPending } = require('../services/pendingDb');
+const { addPending, removePendingForGame } = require('../services/pendingDb');
 const { classifyId, consoleLabel, detectEmuConsole } = require('../utils/consoleClassifier');
 const logger = require('../utils/logger');
 const open = require('open');
+const { handleInteractiveOpen } = require('./open');
 const readline = require('readline');
 const fs = require('fs');
 const path = require('path');
@@ -84,6 +85,20 @@ function detectFileType(fileName) {
  * Performs download for a single game.
  */
 async function downloadSingleGame(game, options = {}) {
+  // If interactive mode (-i) is specified, do not attempt automated download.
+  // Instead, open the game page in browser and add to pending manual downloads (matching `dlps open`).
+  // If the game is already completed, just open it without adding to pending.
+  if (options.interactive) {
+    logger.info(`Opening: "${game.title}" (${game.url})`);
+    try {
+      await open(game.url);
+    } catch (e) {
+      logger.error(`Failed to open browser for "${game.title}": ${e.message}`);
+    }
+    const added = await handleInteractiveOpen(game);
+    return added ? 'manual' : 'skipped';
+  }
+
   const spinner = ora(`Scraping subpage for "${game.title}"...`).start();
   let bestKnownPpsa = 'Unknown';
   try {
@@ -385,6 +400,15 @@ async function downloadSingleGame(game, options = {}) {
                   backportFw: reg.backportFw
                 });
               }
+              const removed = removePendingForGame({
+                title: game.title,
+                ppsa: bestLinks.ppsa || targetPPSA,
+                url: game.url,
+                titleQuery: game.title
+              });
+              if (removed.length > 0) {
+                removed.forEach(r => logger.info(`Removed "${r.title}" from pending manual downloads.`));
+              }
             }
           }
           success = true;
@@ -535,11 +559,13 @@ async function downloadCommand(titleQuery, options = {}) {
 
       const count = Math.min(limit, tbdList.length);
       const useFdmBatch = !!(process.env.DOWNLOAD_MANAGER || '').trim();
-      const maxConcurrentGames = useFdmBatch
+      const maxConcurrentGames = (useFdmBatch && !options.interactive)
         ? parseInt(process.env.DOWNLOADER_PARALLEL_GAME_PARSING || '1', 10)
         : 1;
-      const modeLabel = useFdmBatch ? `FDM, up to ${maxConcurrentGames} games concurrent` : 'sequential';
-      logger.info(`Starting batch download of ${count} games [${modeLabel}]...`);
+      const modeLabel = options.interactive
+        ? 'manual queue (-i)'
+        : (useFdmBatch ? `FDM, up to ${maxConcurrentGames} games concurrent` : 'sequential');
+      logger.info(`Starting batch ${options.interactive ? 'open' : 'download'} of ${count} games [${modeLabel}]...`);
 
       // Rolling window: as soon as one game finishes, the next starts immediately
       let nextIdx = 0;
@@ -547,6 +573,7 @@ async function downloadCommand(titleQuery, options = {}) {
       let downloadedCount = 0;
       let failedCount = 0;
       let skippedCount = 0;
+      let manualCount = 0;
       await new Promise((resolveAll) => {
         function startNext() {
           while (active < maxConcurrentGames && nextIdx < count) {
@@ -554,13 +581,14 @@ async function downloadCommand(titleQuery, options = {}) {
             const slotNum = nextIdx + 1;
             nextIdx++;
             active++;
-            console.log(chalk.bold.magenta(`\n=== [${slotNum}/${count}] Starting: ${game.title} ===`));
+            console.log(chalk.bold.magenta(`\n=== [${slotNum}/${count}] ${options.interactive ? 'Opening' : 'Starting'}: ${game.title} ===`));
             markProgress(game.normalizedTitle);
             downloadSingleGame(game, options)
               .then(status => {
                 if (status === 'downloaded') downloadedCount++;
                 else if (status === 'skipped') skippedCount++;
-                else failedCount++; // 'manual' (browser fallback) — not downloaded
+                else if (status === 'manual') manualCount++;
+                else failedCount++;
               })
               .catch(e => {
                 failedCount++;
@@ -580,14 +608,18 @@ async function downloadCommand(titleQuery, options = {}) {
         startNext();
       });
 
-      logger.success('\nBatch download job finished.');
-      const parts = [`${chalk.green(downloadedCount)} downloaded`, `${chalk.red(failedCount)} failed`];
-      if (skippedCount > 0) parts.push(`${chalk.gray(skippedCount)} skipped/labeled`);
-      logger.info(`Result: ${parts.join(', ')}.`);
-      if (failedCount > 0) {
-        if (options.interactive) {
-          logger.info(`Manual pages opened. After downloading, run \`dlps completed --pending\` to mark them done.`);
-        } else {
+      logger.success('\nBatch job finished.');
+      if (options.interactive) {
+        const parts = [`${chalk.cyan(manualCount)} opened for manual download`];
+        if (skippedCount > 0) parts.push(`${chalk.gray(skippedCount)} skipped/already completed`);
+        if (failedCount > 0) parts.push(`${chalk.red(failedCount)} failed`);
+        logger.info(`Result: ${parts.join(', ')}.`);
+        logger.info(`After downloading, run \`dlps completed --pending\` to mark them done.`);
+      } else {
+        const parts = [`${chalk.green(downloadedCount)} downloaded`, `${chalk.red(failedCount)} failed`];
+        if (skippedCount > 0) parts.push(`${chalk.gray(skippedCount)} skipped/labeled`);
+        logger.info(`Result: ${parts.join(', ')}.`);
+        if (failedCount > 0) {
           logger.info(`Re-run \`dlps download -l ${failedCount} -i\` to open the failed ${failedCount} game(s) for manual download.`);
         }
       }

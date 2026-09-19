@@ -159,7 +159,27 @@ class PS4Platform extends BasePlatform {
         }
       }
 
-      for (const file of extraFiles) {
+      const directories = extraFiles.filter(f => {
+        try { return fs.statSync(path.join(downloadDir, f)).isDirectory(); } catch (e) { return false; }
+      });
+      const nonDirExtraFiles = extraFiles.filter(f => !directories.includes(f));
+
+      for (const dir of directories) {
+        const dirPath = path.join(downloadDir, dir);
+        const pkgFiles = findFilesWithExt(dirPath, '.pkg');
+        for (const pkg of pkgFiles) {
+          const uniquePath = getUniqueFilePath(downloadDir, path.parse(pkg).name, '.pkg', pkg);
+          try {
+            fs.renameSync(pkg, uniquePath);
+            registeredFiles.push({ fileName: path.basename(uniquePath), type });
+          } catch (e) {
+            registeredFiles.push({ fileName: path.basename(pkg), type });
+          }
+        }
+        try { fs.rmSync(dirPath, { recursive: true, force: true }); } catch (e) {}
+      }
+
+      for (const file of nonDirExtraFiles) {
         const ext    = path.extname(file).toLowerCase();
         
         const currentPath = path.join(downloadDir, file);
@@ -198,6 +218,9 @@ class PS4Platform extends BasePlatform {
       }
     }
     
+    registeredFiles.finalTitle = finalTitle;
+    registeredFiles.finalPpsa  = finalPpsa;
+    registeredFiles.finalVer   = finalVer;
     return registeredFiles;
   }
 }

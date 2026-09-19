@@ -1,6 +1,7 @@
 const { findGameInWebList, getWebGameList } = require('../services/webScraper');
 const { loadLocalLibrary } = require('../services/localLibrary');
 const { loadDownloadedGames, addDownloadedGame } = require('../services/downloadedDb');
+const { removePendingForGame } = require('../services/pendingDb');
 const { normalizeTitle } = require('../utils/titleNormalizer');
 const { extractTitleId } = require('../utils/consoleClassifier');
 const logger = require('../utils/logger');
@@ -186,6 +187,10 @@ async function dupeCommand(query) {
           region: selected.region
         });
         logger.success(`Marked "${webGame.title}" as duplicate of "${selected.title}" (ID: ${parentPpsa})`);
+        const removed = removePendingForGame({ title: webGame.title, ppsa: parentPpsa, url: webGame.url });
+        if (removed.length > 0) {
+          removed.forEach(r => logger.info(`Removed "${r.title}" from pending manual downloads.`));
+        }
       } else {
         console.log(chalk.red('Invalid selection. Skipped.'));
       }

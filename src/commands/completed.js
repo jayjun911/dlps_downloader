@@ -1,6 +1,6 @@
 const { findGameInWebList } = require('../services/webScraper');
 const { addDownloadedGame, loadDownloadedGames, removeDownloadedGame } = require('../services/downloadedDb');
-const { loadPending, removePending } = require('../services/pendingDb');
+const { loadPending, removePending, removePendingForGame } = require('../services/pendingDb');
 const { loadLabelMap } = require('../services/labelDb');
 const { platformDataPath } = require('../services/platformConfig');
 const logger = require('../utils/logger');
@@ -780,11 +780,16 @@ async function handlePending(titleQuery = '', options = {}) {
   // (auto-labeled as another console/JPN, already completed, or excluded). Clean
   // them out of the queue so only genuine manual candidates remain.
   const labelMap = loadLabelMap();
-  const completedSet = new Set(loadDownloadedGames().map(g => g.normalizedTitle));
+  const completedList = loadDownloadedGames();
+  const completedSet = new Set(completedList.map(g => g.normalizedTitle));
+  const completedPpsaSet = new Set(completedList.map(g => g.ppsa).filter(p => p && p !== 'Unknown').map(p => p.toUpperCase()));
   const { loadExcludedGames } = require('../services/excludedDb');
   const excludedSet = new Set(loadExcludedGames().map(g => g.normalizedTitle));
   const stale = pending.filter(p =>
-    labelMap.has(p.normalizedTitle) || completedSet.has(p.normalizedTitle) || excludedSet.has(p.normalizedTitle)
+    labelMap.has(p.normalizedTitle) ||
+    completedSet.has(p.normalizedTitle) ||
+    (p.ppsa && p.ppsa !== 'Unknown' && completedPpsaSet.has(p.ppsa.toUpperCase())) ||
+    excludedSet.has(p.normalizedTitle)
   );
   if (stale.length > 0) {
     removePending(stale.map(p => p.normalizedTitle));
@@ -952,6 +957,12 @@ async function completedCommand(titleQuery, options = {}) {
     }
 
     // Case 2: Adding to completed list (standard behavior)
+    let targetPpsa = null;
+    if (options.ppsa) {
+      const raw = String(options.ppsa).trim();
+      targetPpsa = /^\d{5}$/.test(raw) ? `PPSA${raw}` : raw.toUpperCase();
+    }
+
     const matches = await findGameInWebList(titleQuery);
     
     if (matches.length === 0) {
@@ -968,12 +979,16 @@ async function completedCommand(titleQuery, options = {}) {
             addDownloadedGame({
               title: titleQuery,
               fileName: 'Manual Entry',
-              ppsa: 'Unknown',
+              ppsa: targetPpsa || 'Unknown',
               password: '',
               source: 'Manual',
               region: 'Unknown'
             });
             logger.success(`Successfully marked as completed: "${titleQuery}"`);
+            const removed = removePendingForGame({ title: titleQuery, ppsa: targetPpsa, titleQuery });
+            if (removed.length > 0) {
+              removed.forEach(r => logger.info(`Removed "${r.title}" from pending manual downloads.`));
+            }
           } else {
             logger.info('Cancelled.');
           }
@@ -987,7 +1002,7 @@ async function completedCommand(titleQuery, options = {}) {
       const game = matches[0];
       // Try to parse PPSA from slug or URL if possible
       const ppsaMatch = game.url.match(/ppsa\d{5}/i);
-      const parsedPpsa = ppsaMatch ? ppsaMatch[0].toUpperCase() : 'Unknown';
+      const parsedPpsa = targetPpsa || (ppsaMatch ? ppsaMatch[0].toUpperCase() : 'Unknown');
 
       addDownloadedGame({
         title: game.title,
@@ -998,6 +1013,10 @@ async function completedCommand(titleQuery, options = {}) {
         region: 'Unknown'
       });
       logger.success(`Successfully marked as completed: "${game.title}" (PPSA: ${parsedPpsa})`);
+      const removed = removePendingForGame({ title: game.title, ppsa: parsedPpsa, url: game.url, titleQuery });
+      if (removed.length > 0) {
+        removed.forEach(r => logger.info(`Removed "${r.title}" from pending manual downloads.`));
+      }
       return;
     }
 
@@ -1019,7 +1038,7 @@ async function completedCommand(titleQuery, options = {}) {
         if (num > 0 && num <= matches.length) {
           const selected = matches[num - 1];
           const ppsaMatch = selected.url.match(/ppsa\d{5}/i);
-          const parsedPpsa = ppsaMatch ? ppsaMatch[0].toUpperCase() : 'Unknown';
+          const parsedPpsa = targetPpsa || (ppsaMatch ? ppsaMatch[0].toUpperCase() : 'Unknown');
           
           addDownloadedGame({
             title: selected.title,
@@ -1030,6 +1049,10 @@ async function completedCommand(titleQuery, options = {}) {
             region: 'Unknown'
           });
           logger.success(`Successfully marked as completed: "${selected.title}" (PPSA: ${parsedPpsa})`);
+          const removed = removePendingForGame({ title: selected.title, ppsa: parsedPpsa, url: selected.url, titleQuery });
+          if (removed.length > 0) {
+            removed.forEach(r => logger.info(`Removed "${r.title}" from pending manual downloads.`));
+          }
         } else {
           logger.info('Cancelled.');
         }

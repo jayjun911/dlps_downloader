@@ -6,14 +6,22 @@ const readline = require('readline');
 const chalk = require('chalk');
 
 /**
- * Helper to resolve the game's PPSA and add it to the pending queue.
+ * Helper to resolve the game's PPSA and add it to the pending queue
+ * (skips adding to pending if the game is already completed).
  */
 async function handleInteractiveOpen(selected) {
+  const { loadDownloadedGames } = require('../services/downloadedDb');
+  const { normalizeTitle } = require('../utils/titleNormalizer');
+  const normTitle = selected.normalizedTitle || normalizeTitle(selected.title || '');
+
+  const downloadedGames = loadDownloadedGames();
+  const isCompletedByTitle = downloadedGames.some(g => g.normalizedTitle === normTitle);
+
   let bestKnownPpsa = 'Unknown';
   try {
     const { loadLocalLibrary } = require('../services/localLibrary');
     const localGames = loadLocalLibrary();
-    const localMatch = localGames.find(lg => lg.normalizedTitle === selected.normalizedTitle);
+    const localMatch = localGames.find(lg => lg.normalizedTitle === normTitle);
     if (localMatch && localMatch.ppsa) {
       bestKnownPpsa = localMatch.ppsa;
     } else {
@@ -26,8 +34,22 @@ async function handleInteractiveOpen(selected) {
   } catch (err) {
     // ignore scraping/local-loading errors since we are opening it in browser anyway
   }
+
+  const isCompleted = isCompletedByTitle || downloadedGames.some(g => {
+    if (bestKnownPpsa && bestKnownPpsa !== 'Unknown' && g.ppsa && g.ppsa.toUpperCase() === bestKnownPpsa.toUpperCase()) {
+      return true;
+    }
+    return false;
+  });
+
+  if (isCompleted) {
+    logger.info(`"${selected.title}" is already marked as completed. Skipping adding to pending.`);
+    return false;
+  }
+
   addPending({ title: selected.title, url: selected.url, ppsa: bestKnownPpsa });
   logger.success(`Added "${selected.title}" to pending manual downloads.`);
+  return true;
 }
 
 /**
@@ -91,3 +113,4 @@ async function openCommand(titleQuery, options = {}) {
 }
 
 module.exports = openCommand;
+module.exports.handleInteractiveOpen = handleInteractiveOpen;

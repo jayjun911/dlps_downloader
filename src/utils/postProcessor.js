@@ -99,6 +99,107 @@ function findFilesWithExt(dir, ext) {
   return results;
 }
 
+function findExfatInFolder(dir) {
+  if (!fs.existsSync(dir)) return null;
+  for (const file of fs.readdirSync(dir)) {
+    const fullPath = path.join(dir, file);
+    let isDir = false;
+    try { isDir = fs.statSync(fullPath).isDirectory(); } catch (e) {}
+    if (isDir) {
+      const found = findExfatInFolder(fullPath);
+      if (found) return found;
+    } else if (file.toLowerCase().endsWith('.exfat')) {
+      return fullPath;
+    }
+  }
+  return null;
+}
+
+function findFfpkgInFolder(dir) {
+  if (!fs.existsSync(dir)) return null;
+  for (const file of fs.readdirSync(dir)) {
+    const fullPath = path.join(dir, file);
+    let isDir = false;
+    try { isDir = fs.statSync(fullPath).isDirectory(); } catch (e) {}
+    if (isDir) {
+      const found = findFfpkgInFolder(fullPath);
+      if (found) return found;
+    } else if (file.toLowerCase().endsWith('.ffpkg')) {
+      return fullPath;
+    }
+  }
+  return null;
+}
+
+async function processDownloadedFiles(params) {
+  const {
+    downloadedFiles,
+    downloadDir,
+    password = '',
+    hostName = 'Manual',
+    region = 'USA',
+    initialTitle = 'Unknown Game',
+    initialPpsa = 'Unknown',
+    initialVer = 'v01.00',
+    platform: platformKey
+  } = params;
+
+  const { getPlatformHandler } = require('../platforms');
+  const { getCurrentPlatformKey } = require('../services/platformConfig');
+  const { addDownloadedGame } = require('../services/downloadedDb');
+
+  const pKey = platformKey || getCurrentPlatformKey() || 'ps5';
+  const platform = getPlatformHandler(pKey);
+
+  const registeredFiles = await platform.postProcess({
+    downloadedFiles,
+    downloadDir,
+    password,
+    hostName,
+    region,
+    initialTitle,
+    initialPpsa,
+    initialVer
+  });
+
+  const finalTitle = (registeredFiles && registeredFiles.finalTitle) || initialTitle;
+  const finalPpsa  = (registeredFiles && registeredFiles.finalPpsa)  || initialPpsa;
+  const finalVer   = (registeredFiles && registeredFiles.finalVer)   || initialVer;
+
+  if (registeredFiles && registeredFiles.length > 0) {
+    for (const reg of registeredFiles) {
+      addDownloadedGame({
+        title: reg.title || (finalTitle !== 'Unknown Game' ? finalTitle : (initialTitle !== 'Unknown Game' ? initialTitle : finalTitle)),
+        fileName: reg.fileName,
+        ppsa: reg.ppsa || finalPpsa,
+        password: password || '',
+        source: hostName,
+        region: reg.region || region
+      });
+    }
+
+    const { removePendingForGame } = require('../services/pendingDb');
+    const logger = require('./logger');
+    const titleToClean = (finalTitle !== 'Unknown Game' ? finalTitle : (initialTitle !== 'Unknown Game' ? initialTitle : ''));
+    const ppsaToClean = (finalPpsa && finalPpsa !== 'Unknown') ? finalPpsa : initialPpsa;
+    const removed = removePendingForGame({
+      title: titleToClean,
+      ppsa: ppsaToClean,
+      titleQuery: initialTitle !== 'Unknown Game' ? initialTitle : ''
+    });
+    if (removed && removed.length > 0) {
+      removed.forEach(r => logger.info(`Removed "${r.title}" from pending manual downloads.`));
+    }
+  }
+
+  return {
+    registeredFiles,
+    finalTitle,
+    finalPpsa,
+    finalVer
+  };
+}
+
 module.exports = {
   detectFileType,
   buildTypeTag,
@@ -106,5 +207,9 @@ module.exports = {
   checkIsSplitArchive,
   findMainArchiveFile,
   getUniqueFilePath,
-  findFilesWithExt
+  findFilesWithExt,
+  findExfatInFolder,
+  findFfpkgInFolder,
+  processDownloadedFiles
 };
+
