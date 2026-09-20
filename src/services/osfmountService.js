@@ -5,7 +5,19 @@ const logger = require('../utils/logger');
 const { deriveVersionFromParam, deriveTitleNameFromParam } = require('../utils/versionParser');
 
 function getOsfMountPath() {
-  return process.env.OSFMOUNT_PATH || 'C:\\Program Files\\OSFMount\\OSFMount.exe';
+  if (process.env.OSFMOUNT_PATH) {
+    let p = process.env.OSFMOUNT_PATH;
+    if (p.toLowerCase().endsWith('osfmount.exe')) {
+      const comAlt = p.slice(0, -4) + '.com';
+      if (fs.existsSync(comAlt)) return comAlt;
+    }
+    if (fs.existsSync(p)) return p;
+  }
+  const defaultCom = 'C:\\Program Files\\OSFMount\\OSFMount.com';
+  if (fs.existsSync(defaultCom)) return defaultCom;
+  const defaultExe = 'C:\\Program Files\\OSFMount\\OSFMount.exe';
+  if (fs.existsSync(defaultExe)) return defaultExe;
+  return defaultCom;
 }
 
 function findFreeDriveLetter() {

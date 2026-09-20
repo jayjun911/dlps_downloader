@@ -151,7 +151,7 @@ async function downloadSingleGame(game, options = {}) {
     const localMatch = localGames.find(lg => lg.normalizedTitle === game.normalizedTitle);
     const targetPPSA = localMatch ? localMatch.ppsa : null;
 
-    // Best-effort PPSA for the pending-manual queue (used by `completed --pending`).
+    // Best-effort PPSA for the pending-manual queue (used by `process --pending`).
     bestKnownPpsa = targetPPSA || (sections.find(s => s.ppsa) || {}).ppsa || 'Unknown';
 
     // --section: interactively pick a section
@@ -481,7 +481,7 @@ async function downloadSingleGame(game, options = {}) {
       err.isHandled = true;
     }
     // Open this game's page in the browser under -i for manual download; queue it
-    // so it can later be batch-marked via `completed --pending`.
+    // so it can later be batch-marked via `process --pending`.
     if (options.interactive) {
       try {
         logger.info(`Opening game page for manual inspection: ${game.url}`);
@@ -614,7 +614,7 @@ async function downloadCommand(titleQuery, options = {}) {
         if (skippedCount > 0) parts.push(`${chalk.gray(skippedCount)} skipped/already completed`);
         if (failedCount > 0) parts.push(`${chalk.red(failedCount)} failed`);
         logger.info(`Result: ${parts.join(', ')}.`);
-        logger.info(`After downloading, run \`dlps completed --pending\` to mark them done.`);
+        logger.info(`After downloading, run \`dlps process --pending\` to mark them done.`);
       } else {
         const parts = [`${chalk.green(downloadedCount)} downloaded`, `${chalk.red(failedCount)} failed`];
         if (skippedCount > 0) parts.push(`${chalk.gray(skippedCount)} skipped/labeled`);

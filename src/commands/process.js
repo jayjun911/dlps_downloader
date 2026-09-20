@@ -4,24 +4,27 @@ const { processDownloadedFiles } = require('../utils/postProcessor');
 const { sanitizeFileName } = require('../services/unrarService');
 const { extractPPSA } = require('../utils/ppsaParser');
 const { extractVersion } = require('../utils/versionParser');
+const { handlePending } = require('./pendingProcess');
 const logger = require('../utils/logger');
 
 /**
- * dlps process <filepath|folderpath> [--password <pw>]
+ * dlps process [filepath|folderpath] [--pending] [--password <pw>] [--ppsa <ppsa>]
  *
  * Flow:
- *   1. Is it a decompressed folder?    → folder pipeline:
- *        → contains .exfat inside?     → mount → validate → compress → cleanup
- *        → contains .ffpkg inside?     → UFS2 pipeline → compress → cleanup
- *        → contains PS5 game files?    → read param.json → compress → cleanup
- *   2. Is the file a raw .exfat?       → exFAT pipeline (mount → validate → compress)
- *   3. Is the file a .ffpkg?           → UFS2 pipeline (validate + read param.json → compress)
- *   4. Is it a compressed archive?
- *        → contains .exfat inside?     → exFAT pipeline (extract → mount → validate → compress)
- *        → contains PS5 game files?    → standard pipeline (extract → compress)
- *   Title / PPSA / version come from param.json inside the content, not the filename.
+ *   - If --pending: batch-process downloaded archives for pending manual games and mark completed.
+ *   - Otherwise: post-process a single archive or decompressed folder.
  */
 async function processCommand(targetPath, options = {}) {
+  // Batch-process archives and complete games queued for manual download via `download -i` or `open`.
+  if (options.pending) {
+    return handlePending(targetPath, options);
+  }
+
+  if (!targetPath) {
+    logger.error('Please specify a file or directory path to process, or use --pending to batch-process pending manual downloads.');
+    return;
+  }
+
   const absPath = path.resolve(targetPath);
 
   if (!fs.existsSync(absPath)) {

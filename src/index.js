@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
-require('dotenv').config({ override: true });
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '../.env'), override: true });
 const { program } = require('commander');
 const listCommand = require('./commands/list');
 const downloadCommand = require('./commands/download');
@@ -82,9 +83,11 @@ program
 
 program
   .command('process')
-  .argument('<path>', 'Path to a downloaded file (.exfat/.rar/.zip/.7z/.ffpkg) or decompressed folder')
+  .argument('[path]', 'Path to a downloaded file (.exfat/.rar/.zip/.7z/.ffpkg) or decompressed folder, or game title with --pending')
+  .option('--pending', 'Batch-process downloaded archives and mark pending games as completed')
   .option('-p, --password <string>', 'Archive password (if needed)')
-  .description('Post-process a manually downloaded file or decompressed folder: validate, rename, compress, register')
+  .option('--ppsa <ppsa>', 'Specify PPSA ID to filter or update pending game(s)')
+  .description('Post-process a manually downloaded file/folder, or batch-process pending manual downloads')
   .action((targetPath, options) => {
     const processCommand = require('./commands/process');
     processCommand(targetPath, options);

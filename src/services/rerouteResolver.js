@@ -15,10 +15,10 @@ function sanitizeFichierUrl(url) {
 }
 
 // Regular expression to match allowed download host domains
-const DOWNLOAD_HOST_REGEX = /^https?:\/\/(?:www\.)?(?:1fichier\.com|datanodes\.to|mediafire\.com|rootz\.so|akirabox\.com|vikingfile\.com|mega\.nz|buzzheavier\.com|filekeeper\.net)\//i;
+const DOWNLOAD_HOST_REGEX = /^https?:\/\/(?:www\.)?(?:1fichier\.com|datanodes\.to|mediafire\.com|rootz\.so|akirabox\.(?:com|to)|vikingfile\.com|mega\.nz|buzzheavier\.com|filekeeper\.net|datavaults\.co)\//i;
 
 // Regular expression to find URLs inside plain text
-const PLAIN_TEXT_URL_REGEX = /https?:\/\/(?:www\.)?(?:1fichier\.com|datanodes\.to|mediafire\.com|rootz\.so|akirabox\.com|vikingfile\.com|mega\.nz|buzzheavier\.com|filekeeper\.net)\/[^\s"'<>]+/gi;
+const PLAIN_TEXT_URL_REGEX = /https?:\/\/(?:www\.)?(?:1fichier\.com|datanodes\.to|mediafire\.com|rootz\.so|akirabox\.(?:com|to)|vikingfile\.com|mega\.nz|buzzheavier\.com|filekeeper\.net|datavaults\.co)\/[^\s"'<>]+/gi;
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';
 
@@ -49,29 +49,79 @@ function extractUrlFromOnclick(onclickStr) {
   return null;
 }
 
+/**
+ * Extracts URL from an anchor element, handling href, data-domain + data-path,
+ * secure-split (data-d1, data-d2, ... + data-path), and onclick concatenation.
+ */
+function extractUrlFromElement($, el) {
+  const $el = $(el);
+  const href = ($el.attr('href') || '').trim();
+  const dataDomain = ($el.attr('data-domain') || '').trim();
+  const dataPath = ($el.attr('data-path') || '').trim();
+  const onclickAttr = ($el.attr('onclick') || '').trim();
+
+  // Check for secure-split: data-d1, data-d2, ...
+  const dParts = [];
+  let dIdx = 1;
+  while ($el.attr(`data-d${dIdx}`) || $el.attr(`data-domain${dIdx}`)) {
+    const val = ($el.attr(`data-d${dIdx}`) || $el.attr(`data-domain${dIdx}`)).trim();
+    dParts.push(val);
+    dIdx++;
+  }
+  if (dParts.length > 0) {
+    const domain = dParts.join('');
+    const path = dataPath || '';
+    const full = domain + path;
+    if (full.startsWith('http')) return full;
+  }
+
+  if (dataDomain && dataPath) {
+    return dataDomain + dataPath;
+  }
+  if (onclickAttr) {
+    const onclickUrl = extractUrlFromOnclick(onclickAttr);
+    if (onclickUrl) return onclickUrl;
+  }
+  if (href && href !== '#' && !href.startsWith('javascript:')) {
+    return href;
+  }
+  return '';
+}
+
 async function fetchRawHtml(url) {
+  let responseHtml = '';
   try {
     const res = await axios.get(url, {
       headers: { 'User-Agent': USER_AGENT }
     });
-    const html = res.data;
-    if (html && (html.includes('Just a moment...') || html.includes('challenges.cloudflare.com'))) {
-      throw new Error('Cloudflare Turnstile challenge detected.');
-    }
-    return html;
+    responseHtml = res.data;
   } catch (axiosErr) {
-    try {
-      const cmd = `curl -s -L -A "${USER_AGENT}" "${url}"`;
-      const stdout = execSync(cmd, { encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 });
-      if (stdout && stdout.trim().length > 0 && !stdout.includes('Just a moment...') && !stdout.includes('challenges.cloudflare.com')) {
-        return stdout;
-      } else {
-        throw axiosErr;
+    if (axiosErr.response && typeof axiosErr.response.data === 'string') {
+      responseHtml = axiosErr.response.data;
+    }
+    if (!responseHtml || (!responseHtml.includes('Just a moment...') && !responseHtml.includes('challenges.cloudflare.com'))) {
+      try {
+        const cmd = `curl -s -L -A "${USER_AGENT}" "${url}"`;
+        const stdout = execSync(cmd, { encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 });
+        if (stdout && stdout.trim().length > 0) {
+          responseHtml = stdout;
+        }
+      } catch (curlErr) {
+        // ignore
       }
-    } catch (curlErr) {
+    }
+    if (!responseHtml) {
       throw axiosErr;
     }
   }
+
+  if (responseHtml && (responseHtml.includes('Just a moment...') || responseHtml.includes('challenges.cloudflare.com'))) {
+    const err = new Error('Cloudflare Turnstile challenge detected.');
+    err.isCloudflare = true;
+    err.html = responseHtml;
+    throw err;
+  }
+  return responseHtml;
 }
 
 /**
@@ -116,7 +166,21 @@ async function resolveReroute(rerouteUrl, visited = new Set(), depth = 0) {
       }
 
       if (!htmlData) {
-        htmlData = await fetchRawHtml(rerouteUrl);
+        try {
+          htmlData = await fetchRawHtml(rerouteUrl);
+        } catch (fetchErr) {
+          if (fetchErr.isCloudflare || (fetchErr.message && fetchErr.message.includes('Cloudflare Turnstile'))) {
+            throw new Error(`Cloudflare Turnstile challenge blocked resolving reroute URL.
+To bypass this block, please follow these steps:
+1. Open this URL in your web browser:
+   ${rerouteUrl}
+2. Right-click anywhere on the page, select "View Page Source" (or save page as HTML).
+3. Copy all HTML source code and save it exactly to this file path:
+   ${manualRerouteHtmlPath}
+4. Re-run your download command!`);
+          }
+          throw fetchErr;
+        }
       }
     }
 
@@ -138,20 +202,7 @@ To bypass this block, please follow these steps:
       const REROUTE_ARCHIVE_REGEX = /downloadgameps3\.net\/archives\/(\d+)/i;
 
       $('a').each((_, el) => {
-        let url = ($(el).attr('href') || '').trim();
-        const dataDomain = ($(el).attr('data-domain') || '').trim();
-        const dataPath = ($(el).attr('data-path') || '').trim();
-        const onclickAttr = ($(el).attr('onclick') || '').trim();
-        
-        if (dataDomain && dataPath) {
-          url = dataDomain + dataPath;
-        } else if (onclickAttr) {
-          const onclickUrl = extractUrlFromOnclick(onclickAttr);
-          if (onclickUrl) {
-            url = onclickUrl;
-          }
-        }
-        
+        const url = extractUrlFromElement($, el);
         const label = $(el).text().trim() || 'Link';
         if (url) {
           if (DOWNLOAD_HOST_REGEX.test(url)) {
@@ -245,6 +296,9 @@ To bypass this block, please follow these steps:
 
     return resolvedLinks;
   } catch (err) {
+    if (err.message && err.message.includes('Cloudflare Turnstile challenge')) {
+      throw err;
+    }
     throw new Error(`Failed to resolve reroute URL: ${rerouteUrl}. Error: ${err.message}`);
   }
 }

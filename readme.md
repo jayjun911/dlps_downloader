@@ -39,7 +39,7 @@ Configure FDM's default download folder to match `DOWNLOAD_DIR` in your `.env`.
 
 ### OSFMount (optional)
 Required for exFAT region downloads. Used to mount `.exfat` disk images for filesystem validation (`chkdsk`) and metadata extraction (`sce_sys/param.json`). Default path:
-`C:\Program Files\OSFMount\OSFMount.exe`
+`C:\Program Files\OSFMount\OSFMount.com`
 
 ---
 
@@ -70,8 +70,8 @@ DOWNLOADER_PARALLEL_GAME_PARSING=1
 # Increase only if your connection handles many concurrent large downloads.
 DOWNLOADER_SIMUL_DOWN_LIMIT=3
 
-# Path to OSFMount executable (for exFAT region validation)
-OSFMOUNT_PATH=C:\Program Files\OSFMount\OSFMount.exe
+# Path to OSFMount CLI executable (for exFAT region validation)
+OSFMOUNT_PATH=C:\Program Files\OSFMount\OSFMount.com
 ```
 
 *Note: `UnRAR.exe` is auto-downloaded and placed in `bin/` on first run — no manual setup needed.*
@@ -147,8 +147,8 @@ Re-run `dlps download -l 3 -i` to open the failed 3 game(s) for manual download.
 - **failed** — no auto-downloadable host / dead links. These stay in the TBD queue. Plug the count straight into the next command as `-l <failed> -i`.
 - **skipped/labeled** — auto-labeled as another console (PS1/PS2/Saturn) or JPN-only; removed from TBD, not retried.
 
-#### Manual-download workflow (`-i` + `completed --pending`)
-For games with no auto-downloadable host (e.g. only filecrypt/Mega links), use interactive mode to grab them by hand, then batch-mark them completed:
+#### Manual-download workflow (`-i` + `process --pending`)
+For games with no auto-downloadable host (e.g. only filecrypt/Mega links), use interactive mode to grab them by hand, then batch-process and mark them completed:
 
 ```bash
 # 1. First pass — auto-download what it can. Failures stay in TBD.
@@ -158,10 +158,10 @@ dlps download -l 20
 #    Every opened game is queued for manual completion.
 dlps download -l 3 -i
 
-# 3. After manually downloading the files into DOWNLOAD_DIR, batch-mark them done.
-dlps completed --pending
+# 3. After manually downloading the files into DOWNLOAD_DIR, batch-process and mark them done.
+dlps process --pending
 ```
-See [`dlps completed --pending`](#dlps-completed-title) below for the confirmation step.
+See [`dlps process --pending`](#dlps-process-path---pending) below for the confirmation step.
 
 ---
 
@@ -175,18 +175,17 @@ dlps download "https://datanodes.to/abc123" --password "DLPSGAME.COM"
 
 ---
 
-### `dlps completed [title]`
-Manually manage the completed games database.
+### `dlps process [path] [--pending]`
+Post-process a manually downloaded file or decompressed folder, or batch-process pending manual downloads:
 
 ```bash
-dlps completed                          # List all completed
-dlps completed "Game Title"             # Mark as completed
-dlps completed "Game Title" --remove    # Remove from completed
-dlps completed --pending                # Batch-complete manual downloads (see below)
+dlps process "C:\Downloads\game.rar"   # Post-process single file or decompressed folder
+dlps process --pending                 # Batch-process archives and complete manual downloads (see below)
+dlps process "Game Title" --pending    # Filter pending by title
 ```
 
-#### `--pending` — batch-complete manual downloads
-Marks the games queued by `download -i` as completed in one pass. It scans `DOWNLOAD_DIR` and auto-selects any game whose **GAME file is present** — a file whose name contains both the game's ID and the `[Game]` tag (DLC/UPDATE/PATCH files are ignored). The game's PPSA is filled in automatically.
+#### `--pending` — batch-process and complete manual downloads
+Processes downloaded archives and marks games queued by `download -i` or `open` as completed in one pass. It scans `DOWNLOAD_DIR`, processes/recompresses matching archives, and auto-selects any game whose **GAME file is present** — a file whose name contains both the game's ID and the `[Game]` tag (DLC/UPDATE/PATCH files are ignored). The game's PPSA is filled in automatically.
 
 ```
 Pending manual downloads (3):
@@ -195,11 +194,22 @@ Pending manual downloads (3):
   · [03] Another Game [CUSA55555]
 
 ✓ = GAME file found in C:\Z (auto-selected: 2).
-Add any extra numbers to mark completed (e.g. "3 5"), or press Enter to confirm:
+Add extra numbers to mark completed (e.g. "3", "2:PPSA15646", or "2.2"), or press Enter to confirm:
 ```
 - **✓** rows are auto-selected (GAME file detected). Press **Enter** to confirm just those.
 - **·** rows weren't detected — if you downloaded one anyway, type its number (ranges like `1-4 7` work).
 - Only the selected games are marked completed and removed from the queue; the rest stay pending.
+
+---
+
+### `dlps completed [title]`
+Manually manage the completed games database.
+
+```bash
+dlps completed                          # List all completed
+dlps completed "Game Title"             # Mark as completed
+dlps completed "Game Title" --remove    # Remove from completed
+```
 
 ---
 
@@ -334,7 +344,7 @@ FDM의 기본 다운로드 폴더를 `.env`의 `DOWNLOAD_DIR`와 동일하게 �
 
 ### OSFMount (선택 사항)
 exFAT 리전 다운로드 시 필요합니다. `.exfat` 디스크 이미지를 마운트하여 `chkdsk` 검증과 `sce_sys/param.json` 메타데이터 추출에 사용됩니다. 기본 경로:
-`C:\Program Files\OSFMount\OSFMount.exe`
+`C:\Program Files\OSFMount\OSFMount.com`
 
 ---
 
@@ -366,8 +376,8 @@ DOWNLOADER_PARALLEL_GAME_PARSING=1
 # 값이 너무 크면 나중에 큐잉된 URL이 만료되어 400 에러 발생 가능
 DOWNLOADER_SIMUL_DOWN_LIMIT=3
 
-# OSFMount 실행 파일 경로 (exFAT 리전 검증용)
-OSFMOUNT_PATH=C:\Program Files\OSFMount\OSFMount.exe
+# OSFMount CLI 실행 파일 경로 (exFAT 리전 검증용)
+OSFMOUNT_PATH=C:\Program Files\OSFMount\OSFMount.com
 ```
 
 *`UnRAR.exe`는 첫 실행 시 `bin/` 폴더에 자동 다운로드·설치됩니다.*
@@ -443,8 +453,8 @@ Re-run `dlps download -l 3 -i` to open the failed 3 game(s) for manual download.
 - **failed** — 자동 다운로드 가능한 호스트 없음 / dead link. TBD 큐에 그대로 남습니다. 이 숫자를 다음 명령의 `-l <failed> -i`에 그대로 넣으면 됩니다.
 - **skipped/labeled** — 다른 콘솔(PS1/PS2/Saturn)이나 JPN 전용으로 라벨링되어 TBD에서 제외됨 (재시도 안 함).
 
-#### 수동 다운로드 워크플로 (`-i` + `completed --pending`)
-자동 다운로드 호스트가 없는 게임(filecrypt/Mega만 있는 경우 등)은 인터랙티브 모드로 직접 받은 뒤 일괄로 완료 처리합니다:
+#### 수동 다운로드 워크플로 (`-i` + `process --pending`)
+자동 다운로드 호스트가 없는 게임(filecrypt/Mega만 있는 경우 등)은 인터랙티브 모드로 직접 받은 뒤 일괄로 후처리 및 완료 처리합니다:
 
 ```bash
 # 1. 1차 실행 — 받을 수 있는 건 자동 다운로드. 실패분은 TBD에 남음.
@@ -454,10 +464,10 @@ dlps download -l 20
 #    열린 게임은 수동 완료 큐에 기록됨.
 dlps download -l 3 -i
 
-# 3. DOWNLOAD_DIR로 파일을 직접 받은 뒤, 일괄 완료 처리.
-dlps completed --pending
+# 3. DOWNLOAD_DIR로 파일을 직접 받은 뒤, 일괄 후처리 및 완료 처리.
+dlps process --pending
 ```
-확인 단계는 아래 [`dlps completed --pending`](#dlps-completed-title-1) 참고.
+확인 단계는 아래 [`dlps process [path] [--pending]`](#dlps-process-path---pending-1) 참고.
 
 ---
 
@@ -471,18 +481,17 @@ dlps download "https://datanodes.to/abc123" --password "DLPSGAME.COM"
 
 ---
 
-### `dlps completed [title]`
-완료 목록을 수동으로 관리합니다.
+### `dlps process [path] [--pending]`
+수동 다운로드한 파일/압축 해제 폴더를 후처리하거나, 대기 중인 수동 다운로드 게임들을 일괄 후처리/완료 등록합니다:
 
 ```bash
-dlps completed                          # 완료 목록 조회
-dlps completed "Game Title"             # 완료로 등록
-dlps completed "Game Title" --remove    # 완료 목록에서 제거
-dlps completed --pending                # 수동 다운로드 일괄 완료 (아래 참고)
+dlps process "C:\Downloads\game.rar"   # 단일 파일/폴더 후처리
+dlps process --pending                 # 수동 다운로드 일괄 압축/이름변경 및 완료 처리 (아래 참고)
+dlps process "Game Title" --pending    # 특정 타이틀 필터링 후 처리
 ```
 
 #### `--pending` — 수동 다운로드 일괄 완료
-`download -i`로 큐에 기록된 게임들을 한 번에 완료 처리합니다. `DOWNLOAD_DIR`를 스캔해 **GAME 파일이 있는** 게임을 자동 선택합니다 — 파일명에 게임 ID와 `[Game]` 태그가 모두 포함된 파일 (DLC/UPDATE/PATCH 파일은 무시). PPSA는 자동으로 채워집니다.
+`download -i`나 `open`으로 큐에 기록된 게임들을 한 번에 처리합니다. `DOWNLOAD_DIR`를 스캔해 압축파일을 점검/재압축하고 **GAME 파일이 있는** 게임을 자동 선택합니다 — 파일명에 게임 ID와 `[Game]` 태그가 모두 포함된 파일 (DLC/UPDATE/PATCH 파일은 무시). PPSA는 자동으로 채워집니다.
 
 ```
 Pending manual downloads (3):
@@ -491,11 +500,22 @@ Pending manual downloads (3):
   · [03] Another Game [CUSA55555]
 
 ✓ = GAME file found in C:\Z (auto-selected: 2).
-Add any extra numbers to mark completed (e.g. "3 5"), or press Enter to confirm:
+Add extra numbers to mark completed (e.g. "3", "2:PPSA15646", or "2.2"), or press Enter to confirm:
 ```
 - **✓** 행은 자동 선택됨(GAME 파일 감지). 그대로 처리하려면 **Enter**.
 - **·** 행은 미감지 — 받았으면 번호 입력 (`1-4 7` 같은 범위도 가능).
 - 선택된 게임만 완료 처리되고 큐에서 제거됩니다. 나머지는 큐에 남습니다.
+
+---
+
+### `dlps completed [title]`
+완료 목록을 수동으로 관리합니다.
+
+```bash
+dlps completed                          # 완료 목록 조회
+dlps completed "Game Title"             # 완료로 등록
+dlps completed "Game Title" --remove    # 완료 목록에서 제거
+```
 
 ---
 

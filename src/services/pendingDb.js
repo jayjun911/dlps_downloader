@@ -5,7 +5,7 @@ const { normalizeTitle } = require('../utils/titleNormalizer');
 
 // Per-platform "pending manual download" queue, e.g. data/pending_manual-ps4.json
 // Records games whose pages were opened in the browser (download -i) for manual
-// download, so they can later be batch-marked completed via `completed --pending`.
+// download, so they can later be batch-processed and completed via `process --pending`.
 function pendingFile() {
   return platformDataPath('pending_manual', 'json');
 }

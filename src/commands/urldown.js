@@ -11,6 +11,7 @@ function detectService(url) {
   if (/1fichier\.com/i.test(url)) return '1fichier';
   if (/datanodes\.to/i.test(url)) return 'datanodes';
   if (/mediafire\.com/i.test(url)) return 'mediafire';
+  if (/filekeeper\.net/i.test(url)) return 'filekeeper';
   if (/vikingfile\.com|vik1ngfile\.site/i.test(url)) return 'vikingfile';
   return null;
 }
@@ -18,7 +19,7 @@ function detectService(url) {
 async function urldownCommand(url, options = {}) {
   if (!url) {
     logger.error('Usage: dlps urldown <url>');
-    logger.info('Supported: 1fichier.com, datanodes.to, mediafire.com, vikingfile.com');
+    logger.info('Supported: 1fichier.com, datanodes.to, mediafire.com, filekeeper.net, vikingfile.com');
     return;
   }
 
@@ -34,7 +35,7 @@ async function urldownCommand(url, options = {}) {
 
   if (!service) {
     logger.error(`Unsupported URL: ${url}`);
-    logger.info('Supported: 1fichier.com, datanodes.to, mediafire.com, vikingfile.com');
+    logger.info('Supported: 1fichier.com, datanodes.to, mediafire.com, filekeeper.net, vikingfile.com');
     return;
   }
 
@@ -72,6 +73,9 @@ async function urldownCommand(url, options = {}) {
         },
         (status) => { spinner.text = status; }
       );
+    } else if (service === 'filekeeper') {
+      const { downloadWithFdm } = require('../services/fdmDownloader');
+      downloadResult = await downloadWithFdm(url, downloadDir, (status) => { spinner.text = status; });
     } else {
       downloadResult = await download1fichier(url, downloadDir, (progress) => {
         spinner.text = `Downloading ${progress.percent}% (${progress.receivedMB}MB / ${progress.totalMB}MB)`;
@@ -90,7 +94,7 @@ async function urldownCommand(url, options = {}) {
   }
 
   // Post-process: inspect archive, remove password, rename to standard format, register
-  const hostName = service === 'datanodes' ? 'Datanodes' : (service === 'mediafire' ? 'Mediafire' : '1fichier');
+  const hostName = service === 'datanodes' ? 'Datanodes' : (service === 'mediafire' ? 'Mediafire' : (service === 'filekeeper' ? 'FileKeeper' : '1fichier'));
   const downloadedFiles = [{ filename: downloadResult.filename, type: 'GAME' }];
 
   try {

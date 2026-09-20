@@ -55,7 +55,7 @@ const HOST_PRIORITY_PATTERNS = [
   /datanodes\.to/i,
   /1fichier\.com|1file/i,
   /vikingfile\.com|viki/i,
-  /akirabox\.com|akia/i,
+  /akirabox\.(?:com|to)|akia/i,
   /mega\.nz|mega\.co\.nz/i,
   /rootz\.so/i,
   /buzzheavier\.com|buznew/i
@@ -73,7 +73,7 @@ function getHostNameFromUrl(url) {
   if (/1fichier\.com|1file/i.test(url)) return '1fichier';
   if (/datanodes\.to/i.test(url)) return 'Datanodes';
   if (/mediafire\.com/i.test(url)) return 'Mediafire';
-  if (/akirabox\.com|akia/i.test(url)) return 'Akia';
+  if (/akirabox\.(?:com|to)|akia/i.test(url)) return 'Akia';
   if (/vikingfile\.com|viki/i.test(url)) return 'Viki';
   if (/mega\.nz|mega\.co\.nz/i.test(url)) return 'Mega';
   if (/rootz\.so/i.test(url)) return 'Rootz';
@@ -285,11 +285,26 @@ function decodeAndExtractLinks(base64Payload) {
     const blockText = $(blockEl).clone().children('a').remove().end().text().trim();
     const blockLinks = [];
     $(blockEl).find('a').each((_, el) => {
-      let url = ($(el).attr('href') || '').trim();
-      const dataDomain = ($(el).attr('data-domain') || '').trim();
-      const dataPath = ($(el).attr('data-path') || '').trim();
+      const $el = $(el);
+      let url = ($el.attr('href') || '').trim();
+      const dataDomain = ($el.attr('data-domain') || '').trim();
+      const dataPath = ($el.attr('data-path') || '').trim();
 
-      if (dataDomain && dataPath) url = dataDomain + dataPath;
+      // Check for secure-split: data-d1, data-d2, ...
+      const dParts = [];
+      let dIdx = 1;
+      while ($el.attr(`data-d${dIdx}`) || $el.attr(`data-domain${dIdx}`)) {
+        const val = ($el.attr(`data-d${dIdx}`) || $el.attr(`data-domain${dIdx}`)).trim();
+        dParts.push(val);
+        dIdx++;
+      }
+      if (dParts.length > 0) {
+        url = dParts.join('') + (dataPath || '');
+      } else if (dataDomain && dataPath) {
+        url = dataDomain + dataPath;
+      } else if (url === '#' || url.startsWith('javascript:')) {
+        url = '';
+      }
 
       const label = $(el).text().trim() || 'Link';
 
